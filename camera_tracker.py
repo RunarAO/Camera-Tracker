@@ -1,25 +1,27 @@
 #!/usr/bin/env python
 import cv2
 import argparse
-import glob
-from skimage import transform as sk_transform
+#import glob
+#from skimage import transform as sk_transform
 import numpy as np
-from scipy.spatial.transform import Rotation as R
+#from scipy.spatial.transform import Rotation as R
 import rospy
 import os
 import time
 import sys
 import math
-from cv_bridge import CvBridge, CvBridgeError
+import struct
+#from cv_bridge import CvBridge, CvBridgeError
 #import tf
-from tf import TransformListener
+#from tf import TransformListener
 #import message_filters
 from datetime import datetime
+import matplotlib.pyplot as plt
 
 
 basedir = os.path.dirname(__file__)
 sys.path.append(os.path.abspath(os.path.join(basedir, os.path.pardir)))
-from re3.tracker import re3_tracker
+from re3.tracker import re3_tracker 
 from re3.tracker.darknet import darknet_orig as dn
 
 from re3.re3_utils.util import drawing
@@ -57,39 +59,6 @@ boxToDraw = np.zeros(4)
 initialize = True
 
 
-def show_webcam(image, corners=None):
-    global initialize, boxToDraw#,tracker
-
-    if corners is None:
-        try:
-            boxToDraw = tracker.track(image[:,:,::-1], 'Cam')
-        except:
-            print("No Bbox to track")
-
-    else:# all(corners)!=0:
-        iou = bb_intersection_over_union(boxToDraw,corners)
-        if iou < 0.3:
-            initialize = True
-            print ("UPDATED")
-
-    if initialize and corners is not None:
-    	if all(corners)!=0:
-    		boxToDraw = corners
-    		initialize = False
-    		boxToDraw = tracker.track(image[:,:,::-1], 'Cam', boxToDraw)
-
-    elif ((abs(boxToDraw[0]-boxToDraw[2]) > 5) and (abs(boxToDraw[1]-boxToDraw[3]) > 5)):
-    	boxToDraw = tracker.track(image[:,:,::-1], 'Cam')
-    	cv2.rectangle(im,
-	        (int(boxToDraw[0]), int(boxToDraw[1])),
-	        (int(boxToDraw[2]), int(boxToDraw[3])),
-	        [0,0,255], 2)
-
-    #else:
-    #    print("TERMINATED")
-    
-    cv2.imshow('Cam', im)
-    #print (boxToDraw)
 
 
 def yolo_boxes_to_corners(bbox):
@@ -139,7 +108,8 @@ def bb_intersection_over_union(boxA, boxB):
     return iou
 
 
-def detector(image, i, net=0, meta=0, thresh=0.3):
+def detector(image, net=0, meta=0, thresh=0.3):
+    
     detect = dn.detect(net, meta, image, thresh)
     #detect = rospy.Publisher('image', darknetaction.CheckForObjects, queue_size=5)
     #detect = darknetmsg.BoundingBoxes([])
@@ -167,17 +137,33 @@ def findobject(detect):
     except:
         print('NONETYPE')
     return corners
-'''
-def Horizon(image):
+
+def Horizon(self,image):
+    lines = []
     #imgOg = cv2.imread(str(directory)+image) # Read image
-    reduced = cv2.resize(image, (200, 200), interpolation = cv2.INTER_AREA)
-    img_YUV = cv2.cvtColor(reduced,cv2.COLOR_BGR2YCR_CB)  # Convert from BGR to YCRCB
-    b, r, g = cv2.split(img_YUV)                        # Split into blue-green-red channels
+    reduced = cv2.resize(image, (400, 400), interpolation = cv2.INTER_AREA)
+    img_gray = cv2.cvtColor(reduced, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(img_gray,(9,9),0)            # Perform a gaussian blur
+    edges = cv2.Canny(blur,50,150,apertureSize = 3)
+    #lines = cv2.HoughLinesP(edges,1,np.pi/180,100,80,10)
+    lines = cv2.HoughLinesP(edges,rho = 1,theta = 1*np.pi/180,threshold = 100,minLineLength = 100,maxLineGap = 50)
+    try:
+    #for i in range(N):
+        for x1,y1,x2,y2 in lines[0]:
+            cv2.line(reduced,(x1,y1),(x2,y2),(0,255,0),2)
+            np.arctan2((x2-x1),(y2-y1))
+    except:
+        print('OHNO')
+    cv2.imshow('Cam2',reduced)
+    plt.plot_date(x=days, y=impressions, fmt="r-")
+    '''
+    #img_YUV = cv2.cvtColor(reduced,cv2.COLOR_BGR2YCR_CB)  # Convert from BGR to YCRCB
+    #b, r, g = cv2.split(img_YUV)                        # Split into blue-green-red channels
     #b = b*0
     #r = r*0
     #g = g*0
-    imgBlueEqu = cv2.merge((cv2.equalizeHist(b), cv2.equalizeHist(r), cv2.equalizeHist(g))) # Equalize Blue Channel & Merge channels back
-    img_BGR = cv2.cvtColor(imgBlueEqu,cv2.COLOR_YCR_CB2BGR)  # Convert from YCRCB to BGR
+    #imgBlueEqu = cv2.merge((cv2.equalizeHist(b), cv2.equalizeHist(r), cv2.equalizeHist(g))) # Equalize Blue Channel & Merge channels back
+    #img_BGR = cv2.cvtColor(imgBlueEqu,cv2.COLOR_YCR_CB2BGR)  # Convert from YCRCB to BGR
 
     blur = cv2.GaussianBlur(img_BGR,(9,9),0)            # Perform a gaussian blur
     b, r, g = cv2.split(blur)                        # Split into blue-green-red channels
@@ -198,7 +184,7 @@ def Horizon(image):
 
     contour_sizes = [(cv2.contourArea(contour), contour) for contour in contours]
     cv2.imshow('Cam2', thresh)
-    cv2.imshow('Cam3', blur2)
+    #cv2.imshow('Cam3', blur2)
     if len(contour_sizes) > 0:
         biggest_contour = max(contour_sizes, key=lambda x: x[0])[1]
         #print "\t"+str(image)+"\t"+str(cv2.contourArea(biggest_contour))+" \t\tPASS"
@@ -209,7 +195,7 @@ def Horizon(image):
         return biggest_contour
     #else:
         #print "\t"+str(image)+"\t\t\tFAIL"
-'''
+    '''
 '''
 def inverse_transform(pos, quat):
     pos_np = np.array([pos.x, pos.y, pos.z])
@@ -239,19 +225,24 @@ def publish_seapath_pose(msg, llh0=munkholmen):
 class DetectObjects(object):
     def __init__(self):
         # Params
+        self.count = 0
         self.q_b_w = []
         self.pos = []
         self.ned = []
         self.euler_angles = []
-        self.number = 3.
         self.tile = []
         self.tiles = []
         self.image = []
+        self.radar_img = []
         self.millisecond = None
-        #self.addsecond = 0
+        self.firstimage = None
         self.second = None
         self.minute = None
         self.hour = None
+        self.newimagetimestamp = 0
+        self.radar_pixel = 0
+        self.detections = []
+        self.cdetections = []
         #self.dimg = []
         #self.bridge = CvBridge()
         #with np.load('calib.npz') as X:
@@ -267,6 +258,12 @@ class DetectObjects(object):
 
         # Subscribers
         rospy.Subscriber('/seapath/pose',geomsg.PoseStamped, self.pose_callback)
+        #scan_topic = rospy.get_param('~scan_topic', 'radar_scans')
+        #rospy.Subscriber('/radar/radar_scans', automsg.RadarScan, self.radar_callback)#, callback_args=(track_publisher, track_manager, telemetron_tf, measurement_covariance_parameters), queue_size=30)
+        rospy.Subscriber('/radar/estimates', automsg.RadarEstimate, self.radar_callback)
+        rospy.Subscriber('/radar/clusters', automsg.RadarCluster, self.cluster_callback)
+        #rospy.Subscriber('/mr/spokes', automsg.RadarSpoke, self.spoke_callback )
+
         #self.pose = message_filters.Subscriber('/seapath/pose',geomsg.PoseStamped)
         #rospy.Subscriber('/ladybug/camera'+str(self.number)+'/image_raw', Image, self.image_callback)
         self.cam = cv2.VideoCapture('/home/runar/Ladybug/output0.mp4')
@@ -287,67 +284,201 @@ class DetectObjects(object):
     def pose_callback(self, msg):
         self.pose_stamp = float(str(msg.header.stamp))/1e9
         self.pose_time = datetime.fromtimestamp(self.pose_stamp)
-        self.pos = msg.pose.position
+        self.position = msg.pose.position
         self.quat = msg.pose.orientation
-        self.ned = np.array([self.pos.x, self.pos.y, self.pos.z])
+        self.ned = np.array([self.position.x, self.position.y, self.position.z])
         self.q_b_w = np.array([self.quat.x, self.quat.y, self.quat.z, self.quat.w])
         self.euler_angles = conv.quaternion_to_euler_angles(self.q_b_w)
-        #print('POSE', self.euler_angles, self.pose_time, self.pose_stamp)
+        #print('ANGLES', self.euler_angles)
         #print(self.mtx, self.dist, self.rvec, self.tvec)
 
-
-    def image_callback(self, msg):
+    def radar_callback(self, msg):
         
+        self.radar_stamp = float(str(msg.header.stamp))/1e9
+        self.est_track_id = msg.track_id
+        self.posterior_pos = msg.posterior.pos_est
+        self.posterior_vel = msg.posterior.vel_est
+        #print(self.posterior_pos, self.posterior_vel)
+        self.posterior_ned = np.array([self.posterior_pos.x, self.posterior_pos.y])
+        #print(self.radar_stamp)
+        #print(self.centroid_ned, self.ned)
+        dx = self.posterior_pos.x - self.position.x
+        dy = self.posterior_pos.y - self.position.y
+        phi, theta, psi = self.euler_angles
+
+        radar_angle_ned = np.arctan2(dx,dy)
+        self.radar_angle_body = radar_angle_ned - psi + np.deg2rad(3)     # Installation angle offset between camera and radar  
+        if self.radar_angle_body < -np.pi:
+            self.radar_angle_body += 2*np.pi
+        elif self.radar_angle_body > np.pi:
+            self.radar_angle_body -= 2*np.pi
+        self.radar_pixel = int(self.radar_angle_body/self.fov_pixel)
+        #if abs(self.radar_pixel) < (self.width/2):
+        #self.detections.append(self.radar_pixel)
+            #self.radar_img = self.warp.copy()
+            #cv2.line(self.warp, (self.radar_pixel, 0), (self.radar_pixel, self.height), (0,255,0), 10)
+            #cv2.waitKey(100)
+        #print('RADAR_ANGLE',radar_angle_ned, psi, self.radar_angle_body, self.radar_pixel, self.width)
+        self.radar_range = np.sqrt(dx**2+dy**2)
+        print(self.radar_range, self.est_track_id, np.rad2deg(self.radar_angle_body), self.radar_pixel)
+
+        #print(msg)
+        #cv2.imshow('Cam3', self.warp)
+
+    def cluster_callback(self, msg):
+        
+        self.cluster_stamp = float(str(msg.header.stamp))/1e9
+        #self.est_track_id = msg.track_id
+        #print(self.est_track_id)
+        self.centroid_pos = msg.centroid
+        #self.posterior_vel = msg.posterior.vel_est
+        #print(self.posterior_pos, self.posterior_vel)
+        self.centroid_ned = np.array([self.centroid_pos.x, self.centroid_pos.y])
+        #print(self.radar_stamp)
+        #print(self.centroid_ned, self.ned)
+        dx = self.centroid_pos.x - self.position.x
+        dy = self.centroid_pos.y - self.position.y
+        phi, theta, psi = self.euler_angles
+
+        cluster_angle_ned = np.arctan2(dx,dy)
+        self.cluster_angle_body = cluster_angle_ned - psi + np.deg2rad(3)     # Installation angle offset between camera and radar  
+        if self.cluster_angle_body < -np.pi:
+            self.cluster_angle_body += 2*np.pi
+        elif self.cluster_angle_body > np.pi:
+            self.cluster_angle_body -= 2*np.pi
+        self.cluster_pixel = int(self.cluster_angle_body/self.fov_pixel)
+        #if abs(self.radar_pixel) < (self.width/2):
+        self.cdetections.append(self.cluster_pixel)
+            #self.radar_img = self.warp.copy()
+            #cv2.line(self.warp, (self.radar_pixel, 0), (self.radar_pixel, self.height), (0,255,0), 10)
+            #cv2.waitKey(100)
+        #print('RADAR_ANGLE',radar_angle_ned, psi, self.radar_angle_body, self.radar_pixel, self.width)
+        self.cluster_range = np.sqrt(dx**2+dy**2)
+        #print(self.radar_range)
+        #print(msg)
+        #cv2.imshow('Cam3', self.warp)
+
+    def spoke_callback(self, msg):
+        self.spoke_stamp = float(str(msg.header.stamp))/1e9
+        self.azimuth = msg.azimuth
+        self.intensity = msg.intensity
+        for i in self.intensity:
+            d = struct.unpack("c", i)
+            if d != "\x00":
+                print(d)
+            with open('anotherfile.txt', 'a') as the_file:
+                the_file.write(str(i)+'\n')
+        with open('anotherfile.txt', 'a') as the_file:
+                the_file.write('THE__END '+'\n') 
+            #d = int(i,32)
+            #print(str(d))
+            #for ii in i:
+            #    print(self.intensity)
+            #print(self.azimuth)
+
+        
+    def image_callback(self, msg):
+        h, w = msg.shape[:2]
+        tiles = []
+        corners = []
+        objects = []
+
         cv2.imshow('Cam', msg)
         cv2.waitKey(1)
-        # Transform coordinate system
-        Mounting_angle = 72       # 5 cameras, 360/5=72
 
-        heading = np.deg2rad(Mounting_angle*self.number)
-        theta, phi, psi = self.euler_angles
-        psi += heading
-        r3 = self.rotate_along_axis(theta, phi, psi)
-        # Find homography
-        #H, mask = cv2.findHomography(points1, points2, cv2.RANSAC)
-        #H = t1.dot(r1).dot(r2).dot(r3)
-        #print("r2 = ", r2)
-        # Use homography
-        #img_rot = sk_transform.homography(msg, H)
-        
-        #img_rot_center_skew = transform.homography(img, S.dot(np.linalg.inv(T).dot(H).dot(T)))
-        #h, w = msg.shape[:2]
-        #self.stabilized_img = self.rotateImage(msg, 20)# cv2.warpPerspective(msg, H, (w, h))
-        '''
         ## Detect larger objects covering most of the image
-        self.tiles.append(self.stabilized_img[h//4:(h//4)*3,0:w])
-        
+        #tiles.append(msg[h//4:(h//4)*3,0:w])
+
         ## Detect smaller objects
-        self.tiles.append(self.stabilized_img[h//3:(h//3)*2,0:(w//3)])
-        self.tiles.append(self.stabilized_img[h//3:(h//3)*2,(w//3):(w//3)*2])
-        self.tiles.append(self.stabilized_img[h//3:(h//3)*2,(w//3)*2:w])
-        '''
-        '''
-        corners.append(findobject(objects))
+        tiles.append(msg[h//3:(h//3)*2,0:(w//3)])
+        tiles.append(msg[h//3:(h//3)*2,(w//3):(w//3)*2])
+        tiles.append(msg[h//3:(h//3)*2,(w//3)*2:w])
+        
+        i = self.count%10
+        if i < 3:
+            tile = msg[h//3:(h//3)*2,(w//3)*i:(w//3)*i+(w//3)]
+            #for tile in tiles:
+                #cv2.imshow('Tile', tile)
+                #cv2.waitKey(2000)
+           
+            p1p=detector(tile, self.net, self.meta)
+            for d in p1p:
+                print (d)
+                xc, yc, w1, h1 = d[2]
+                lst = list(d)
+                #print(lst)
+                lst[2] = ((xc+((w//3)*i)),(yc+((h//3))),w1,h1)
+                #print(lst)
+                objects.append(lst)
+
+            corners.append(findobject(objects))
             #print("CORNERS",corners)
             if corners != [[]]:
                 corners.sort(key=lambda x:x[1])
                 corner = corners[0][2]
-                show_webcam(dimg, corner)
+                self.show_webcam(self.image, corner)
             else:
-                show_webcam(dimg)
+                self.show_webcam(self.image)
                 #corner = np.zeros(4)
-            
-            #print(corner)
-            #show_webcam(img, corner)
-
         else:
-            show_webcam(dimg)
+            self.show_webcam(self.image)
+        
+        self.count += 1
+        # Transform coordinate system
+        Mounting_angle = 72       # 5 cameras, 360/5=72
+
+        looking_angle = np.deg2rad(00+Mounting_angle*self.number)
+        phi, theta, psi = self.euler_angles
+        #print(self.euler_angles, looking_angle)
+        #psi = looking_angle
+        for d in self.cdetections:
+            #print("DDDD  ",d)
+            cv2.line(self.image, (d+int(w/2), 0), (d+int(w/2), h), (0,255,0), 10) 
+        for d in self.detections:
+            #print("CCCC  ",d)
+            cv2.line(self.image, (d+int(w/2), 0), (d+int(w/2), h), (255,0,0), 10) 
+        self.detections = []
+        self.cdetections = [] 
+        self.rotate_along_axis(-phi, -theta, -looking_angle)
+        #print(corner)
     
-        '''
+    def show_webcam(self, image, corners=None):
+        global initialize, boxToDraw#,tracker
+
+        if corners is None:
+            try:
+                boxToDraw = self.tracker.track(image[:,:,::-1], 'Cam')
+            except:
+                print("No Bbox to track")
+
+        else:# all(corners)!=0:
+            iou = bb_intersection_over_union(boxToDraw,corners)
+            if iou < 0.3:
+                initialize = True
+                print ("UPDATED")
+
+        if initialize and corners is not None:
+            if all(corners)!=0:
+                boxToDraw = corners
+                initialize = False
+                boxToDraw = self.tracker.track(image[:,:,::-1], 'Cam', boxToDraw)
+
+        elif ((abs(boxToDraw[0]-boxToDraw[2]) > 5) and (abs(boxToDraw[1]-boxToDraw[3]) > 5)):
+            boxToDraw = self.tracker.track(image[:,:,::-1], 'Cam')
+            cv2.rectangle(self.image,
+                (int(boxToDraw[0]), int(boxToDraw[1])),
+                (int(boxToDraw[2]), int(boxToDraw[3])),
+                [0,0,255], 2)
+
+        #else:
+        #    print("TERMINATED")
+        
+        cv2.imshow('Cam', self.image)
+        #print (boxToDraw)        
 
 
     """ Wrapper of Rotating a Image """
-    def rotate_along_axis(self, theta=0, phi=0, psi=0, dx=0, dy=0, dz=0):
+    def rotate_along_axis(self, phi=0, theta=0, psi=0, dx=0, dy=0, dz=0):
         
         # Get radius of rotation along 3 axes
         #rtheta, rphi, rpsi = np.deg2rad(theta, phi, psi)
@@ -356,13 +487,13 @@ class DetectObjects(object):
         # NOTE: Change this section to other axis if needed
         #d = np.sqrt(self.height**2 + self.width**2)
         #self.focal = d / (2 * np.sin(psi) if np.sin(psi) != 0 else 1)
-        dz = self.focal*1.5
+        dz = self.focal*1.
         axis = np.float32([[3,0,0], [0,3,0], [0,0,3]]).reshape(-1,3)
 
         # Get projection matrix
-        mat = self.get_M(theta, phi, psi, dx, dy, dz)
+        mat = self.get_M(phi, theta, psi, dx, dy, dz)
         #print (mat)
-
+        '''
         #gray = cv2.cvtColor(self.image.copy(),cv2.COLOR_BGR2GRAY)
         corners = np.array([[1000,1000],[1000,2000],[2000,1000],[2000,2000]])
         #criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
@@ -381,13 +512,14 @@ class DetectObjects(object):
         #cv2.line(self.image, p_start, p_stop, (0,0,255), 3) #Red
         cv2.imshow('Cam2', im)
         cv2.waitKey(1)
-        warp = cv2.warpPerspective(self.image.copy(), mat, (self.width, self.height))
-        cv2.imshow('Cam3', warp)
+        '''
+        self.warp = cv2.warpPerspective(self.image, mat, (self.width, self.height))
+        cv2.imshow('Cam3', self.warp)
         cv2.waitKey(1)
-        return warp
+        #return self.warp
 
     """ Get Perspective Projection Matrix """
-    def get_M(self, theta, phi, psi, dx=0, dy=0, dz=0):
+    def get_M(self, phi, theta, psi, dx=0, dy=0, dz=0):
         
         w = self.width
         h = self.height
@@ -413,13 +545,13 @@ class DetectObjects(object):
         
         # Rotation matrices around the X, Y, and Z axis
         RX = np.array([ [1, 0, 0, 0],
-                        [0, np.cos(theta), -np.sin(theta), 0],
-                        [0, np.sin(theta), np.cos(theta), 0],
+                        [0, np.cos(phi), -np.sin(phi), 0],
+                        [0, np.sin(phi), np.cos(phi), 0],
                         [0, 0, 0, 1]])
         
-        RY = np.array([ [np.cos(phi), 0, -np.sin(phi), 0],
+        RY = np.array([ [np.cos(theta), 0, -np.sin(theta), 0],
                         [0, 1, 0, 0],
-                        [np.sin(phi), 0, np.cos(phi), 0],
+                        [np.sin(theta), 0, np.cos(theta), 0],
                         [0, 0, 0, 1]])
         
         RZ = np.array([ [np.cos(psi), -np.sin(psi), 0, 0],
@@ -443,7 +575,7 @@ class DetectObjects(object):
                         [0, 0, 1, 0]])
 
         # Composed rotation matrix with (CB, R, CBinv)
-        RCB = np.dot(CB, np.dot(R, CB.transpose()))
+        RCB = np.dot(np.dot(CB,R),CB.transpose())
 
         # Final transformation matrix
         return np.dot(A2, np.dot(T, np.dot(RCB, A1)))
@@ -460,66 +592,155 @@ class DetectObjects(object):
     
     def imageNametoTimestamp(self, stamp):
         #ladybug_18408820_20180927_124342_ColorProcessed_000699_Cam3_160568_024-3158.jpg
-        print(stamp[48:54])
-        sec = int(stamp[30:32]) 
-        if (self.second) == None:
+        #print(stamp[23:25])
+        offset = 0.
+        if self.firstimage == None:
+            day = int(stamp[23:25])        ## Issues arrives at midnight
+            month = int(stamp[21:23])
+            year = int(stamp[17:21])
+            self.firstimage = int(stamp[60:66])
+            hour = int(stamp[26:28])
+            minute = int(stamp[28:30])
+            second = int(stamp[30:32])
+            imagetime = datetime(year, month, day, hour, minute, int(second), int((second%1)*1000))
+            self.firstimagetimestamp = time.mktime(imagetime.timetuple())
+            #print(self.firstimagetimestamp)
+            #self.imagetimestamp == self.firstimagetimestamp
+        else:
+            day = int(stamp[23:25])        ## Issues arrives at midnight
+            month = int(stamp[21:23])
+            year = int(stamp[17:21])
+            hour = int(stamp[26:28])
+            minute = int(stamp[28:30])
+            second = int(stamp[30:32])
+            imagetime = datetime(year, month, day, hour, minute, int(second), int((second%1)*1000))
+            self.newimagetimestamp = time.mktime(imagetime.timetuple())
+
+        milli = int(stamp[60:66])
+        self.imagetimestamp = self.firstimagetimestamp + (milli-self.firstimage)/10. + offset
+        if self.newimagetimestamp > self.imagetimestamp:
+            self.imagetimestamp = self.newimagetimestamp
+            #self.firstimagetimestamp = self.newimagetimestamp
+            print('Timestamp updated')
+        #print((milli-self.firstimage)/10., self.firstimagetimestamp)
+        '''
+        if self.hour == None or self.hour < hr:
+            self.hour = hr
+        if self.minute == None or self.minute < mi:
+            self.minute = mi
+         
+        if (self.second) == None:# or self.second < sec:
             self.second = sec
-        milli = int(stamp[48:54])
+        
         if (self.millisecond) == None:
             self.millisecond = milli
         if self.millisecond != milli: 
-            self.second += 0.1 
+            self.second += 0.1
+        self.second = 
         #print('MILLI',self.millisecond)
         if (self.second) > 59:
             self.second = 0
             self.minute +=1
-        mi = int(stamp[28:30])
-        self.minute = mi
         if self.minute > 59:
             self.minute = 0
             self.hour +=1
-        hr = int(stamp[26:28])
-        self.hour = hr
         if self.hour > 23:
             self.hour = 0
-        self.day = int(stamp[23:25])        ## Issues arrives at midnight
-        self.month = int(stamp[21:23])
-        self.year = int(stamp[17:21])
-        print(self.second%1)
+        
+        #print(self.second%1)
         
         imagetime = datetime(self.year, self.month, self.day, self.hour, self.minute, int(self.second), int((self.second%1)*1000))
-        print('IMAGETIME',imagetime)
+        #print('IMAGETIME',imagetime)
         self.imagetimestamp = time.mktime(imagetime.timetuple())
         
         
         #return self.imagetimestamp 
-    
+        '''
+    def Horizon(self):
+        #lines = []
+        #imgOg = cv2.imread(str(directory)+image) # Read image
+        reduced = cv2.resize(self.image, (400, 400), interpolation = cv2.INTER_AREA)
+        img_gray = cv2.cvtColor(reduced, cv2.COLOR_BGR2GRAY)
+        blur = cv2.GaussianBlur(img_gray,(9,9),0)            # Perform a gaussian blur
+        edges = cv2.Canny(blur,50,150,apertureSize = 3)
+        #lines = cv2.HoughLinesP(edges,1,np.pi/180,100,80,10)
+        lines = cv2.HoughLinesP(edges,rho = 1,theta = 1*np.pi/180,threshold = 100,minLineLength = 100,maxLineGap = 50)
+        
+        try:
+        #for i in range(N):
+            for x1,y1,x2,y2 in lines[0]:
+                cv2.line(reduced,(x1,y1),(x2,y2),(0,255,0),2)
+                ang = np.arctan2((y2-y1),(x2-x1))
+                phi, theta, psi = self.euler_angles
+                with open('somefile.txt', 'a') as the_file:
+                    #the_file.write('Hello\n')
+                    the_file.write(str(self.pose_stamp)+';'+str(self.imagetimestamp)+';'+str(ang)+';'+str(phi)+'\n') 
+        except:
+            print('')
+        cv2.imshow('Cam2',reduced)
+        
+        
+        
 
     def start(self):
+        self.net = dn.load_net(b"/home/runar/yolov3.cfg", b"/home/runar/yolov3.weights", 0)
+        self.meta = dn.load_meta(b"/home/runar/coco.data")
+        self.tracker = re3_tracker.Re3Tracker()
         #rospy.loginfo("In attesa")
-        im_dir = "/home/runar/Skrivebord/3"
+        #print("FOV   ",self.fov_pixel)
+        self.number = 0
+        im_dir = "/home/runar/Skrivebord/0"
         file_list = os.listdir(im_dir)
         sorted_file_list = sorted(file_list)#, key=lambda x:x[-30:])
-        i = 17000
+        i = 1#4300
+        #self.image = cv2.imread(im_dir + '/' + sorted_file_list[i])
+        #self.height, self.width = self.image.shape[:2]
+        #print('WWWWWWW', self.width)
+        self.fov_radians = np.deg2rad(100)      #FOV is about 100 deg
+        self.fov_pixel = self.fov_radians/2048#1616.#self.width
         self.image_time = str(sorted_file_list[i])
         #print(self.image_time) 
         self.imageNametoTimestamp(self.image_time)
-        print(self.imagetimestamp-self.pose_stamp, i) 
+        #print(self.imagetimestamp-self.pose_stamp, i) 
         while not rospy.is_shutdown():
             #ret_val, self.image = self.cam.read()
             
             #for i in range(len(sorted_file_list)):# glob.glob('/home/runar/Skrivebord/3/*jpg'):
             #self.image = cv2.imread(im_dir + '/' + sorted_file_list[i])
             
-            print('Ladybug', self.imagetimestamp, self.minute, self.second)
-            print('POSE   ', self.pose_stamp)
-            if abs(self.imagetimestamp - self.pose_stamp) > 1:
-                if self.imagetimestamp < self.pose_stamp:
-                    i += 1#int(self.imagetimestamp < self.pose_stamp)
-                    self.image_time = str(sorted_file_list[i])
-                    print("SMALLER",self.imagetimestamp-self.pose_stamp, i) 
-                    self.imageNametoTimestamp(self.image_time)
-                #if self.imagetimestamp > self.pose_stamp:
+            #print('Ladybug', self.imagetimestamp)
+            #print('POSE   ', self.pose_stamp)
+            #if abs(self.imagetimestamp - self.pose_stamp) > 0.:
+            '''
+            if (self.imagetimestamp - self.pose_stamp) < -500:
+                i += 500# + int(abs(self.imagetimestamp - self.pose_stamp))
+                self.image_time = str(sorted_file_list[i])
+                print("WAIT FOR ME, SMALLER",self.imagetimestamp-self.pose_stamp, i) 
+                self.imageNametoTimestamp(self.image_time)
+            elif (self.imagetimestamp - self.pose_stamp) < -50:
+                i += 50# + int(abs(self.imagetimestamp - self.pose_stamp))
+                self.image_time = str(sorted_file_list[i])
+                print("WAY WAY SMALLER",self.imagetimestamp-self.pose_stamp, i) 
+                self.imageNametoTimestamp(self.image_time)
+            '''
+            if (self.imagetimestamp - self.pose_stamp) < -2:
+                i += int(abs(self.imagetimestamp - self.pose_stamp))
+                self.image_time = str(sorted_file_list[i])
+                print("WAY SMALLER",self.imagetimestamp-self.pose_stamp, i) 
+                self.imageNametoTimestamp(self.image_time)
+            elif (self.imagetimestamp - self.pose_stamp) < -0.06:
+                i += 2# + int(abs(self.imagetimestamp - self.pose_stamp))
+                self.image_time = str(sorted_file_list[i])
+                print("SMALLER",self.imagetimestamp-self.pose_stamp, i) 
+                self.imageNametoTimestamp(self.image_time)
+            elif (self.imagetimestamp - self.pose_stamp) > 0.06:
+                print('LARGER',self.imagetimestamp-self.pose_stamp, i)
+            else:
+                i += 1# + int(abs(self.imagetimestamp - self.pose_stamp))
+                self.image_time = str(sorted_file_list[i])
+                print("GOOD",self.imagetimestamp-self.pose_stamp, i) 
+                self.imageNametoTimestamp(self.image_time)
+                #while self.imagetimestamp > self.pose_stamp:
                 #    break
             self.image = cv2.imread(im_dir + '/' + sorted_file_list[i])
             
@@ -551,12 +772,20 @@ class DetectObjects(object):
                 #self.image = self.bridge.cv2_to_imgmsg(self.cv_image, encoding="passthrough")
                 #self.image.header.stamp = rospy.Time.now()
 
-                cv2.imshow('Cam', self.image)
+                #cv2.imshow('Cam', self.image)
+                #self.Horizon()
                 #print("IMGSIZE",ret_val,cropx,cropy,w,h, roi, newcameramtx)
                 #h, w = self.dimg.shape[:2]
-                #im = dimg.copy()
+                #im = dimg.copy()  
                 self.image_callback(self.image)
+
             #i += 1
+            keyPressed = cv2.waitKey(1)
+            if keyPressed == 27 or keyPressed == 1048603:
+                break  # esc to quit
+            elif keyPressed != -1:
+                paused = True
+            #frameNum += 1
             self.rate.sleep()
             '''
             self.pub_calib.publish(self.image)
@@ -573,8 +802,9 @@ class DetectObjects(object):
 # Main function
 if __name__ == '__main__':
     cv2.namedWindow('Cam', cv2.WINDOW_NORMAL)
-    cv2.namedWindow('Cam2', cv2.WINDOW_NORMAL)
-    cv2.namedWindow('Cam3', cv2.WINDOW_NORMAL)
+    #cv2.namedWindow('Cam2', cv2.WINDOW_NORMAL)
+    cv2.namedWindow('Cam3', cv2.WINDOW_NORMAL) 
+    
     rospy.init_node("CameraTracker")
     # Setup Telemetron ownship tracker
     #telemetron_tf = TransformListener()
