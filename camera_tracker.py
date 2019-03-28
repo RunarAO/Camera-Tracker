@@ -11,7 +11,7 @@ import time
 import sys
 import math
 import struct
-#from cv_bridge import CvBridge, CvBridgeError
+from cv_bridge import CvBridge, CvBridgeError
 #import tf
 #from tf import TransformListener
 #import message_filters
@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 basedir = os.path.dirname(__file__)
 sys.path.append(os.path.abspath(os.path.join(basedir, os.path.pardir)))
 from re3.tracker import re3_tracker 
-from re3.tracker.darknet import darknet_orig as dn
+#from re3.tracker.darknet import darknet_orig as dn
 
 from re3.re3_utils.util import drawing
 from re3.re3_utils.util import bb_util
@@ -40,12 +40,13 @@ import autoseapy.conversion as conv
 identity_quat = geomsg.Quaternion(0,0,0,1)
 identity_pos = geomsg.Point(0,0,0)
 identity_pose = geomsg.Pose(position=identity_pos, orientation=identity_quat)
+from rospy.numpy_msg import numpy_msg
 from sensor_msgs.msg import Image
 from autoseapy.local_state import munkholmen
 import autoseapy.definitions as defs
 #from sensor_msgs.msg import CameraInfo
 
-import actionlib
+#import actionlib
 import darknet_ros_msgs.msg as darknetmsg
 from darknet_ros_msgs.msg import CheckForObjectsAction, CheckForObjectsGoal
 #import darknet_ros_msgs.action as darknetaction
@@ -55,7 +56,7 @@ np.set_printoptions(precision=6)
 np.set_printoptions(suppress=True)
 
 
-boxToDraw = np.zeros(4)
+boxToDraw = None#np.zeros(4)
 initialize = True
 
 
@@ -225,7 +226,9 @@ def publish_seapath_pose(msg, llh0=munkholmen):
 class DetectObjects(object):
     def __init__(self):
         # Params
+        self.detect_ready = True
         self.count = 0
+        self.index = 0
         self.q_b_w = []
         self.pos = []
         self.ned = []
@@ -253,16 +256,18 @@ class DetectObjects(object):
         self.rate = rospy.Rate(10)
 
         # Publishers
-        self.pub_tile = rospy.Publisher('/ladybug/object_img/image_calib', Image, queue_size=15)
-        self.pub_calib = rospy.Publisher('/ladybug/calib_img/image_calib', Image, queue_size=5)
+        self.pub_tile = rospy.Publisher('/ladybug/object_img/image_raw', Image, queue_size=1)
+        #self.pub_calib = rospy.Publisher('/ladybug/calib_img/image_calib', Image, queue_size=5)
 
         # Subscribers
         rospy.Subscriber('/seapath/pose',geomsg.PoseStamped, self.pose_callback)
         #scan_topic = rospy.get_param('~scan_topic', 'radar_scans')
         #rospy.Subscriber('/radar/radar_scans', automsg.RadarScan, self.radar_callback)#, callback_args=(track_publisher, track_manager, telemetron_tf, measurement_covariance_parameters), queue_size=30)
-        rospy.Subscriber('/radar/estimates', automsg.RadarEstimate, self.radar_callback)
-        rospy.Subscriber('/radar/clusters', automsg.RadarCluster, self.cluster_callback)
+        #rospy.Subscriber('/radar/estimates', automsg.RadarEstimate, self.radar_callback)
+        #rospy.Subscriber('/radar/clusters', automsg.RadarCluster, self.cluster_callback)
         #rospy.Subscriber('/mr/spokes', automsg.RadarSpoke, self.spoke_callback )
+        rospy.Subscriber('/darknet_ros/found_object', stdmsg.Int8, self.darknet2_callback)
+        rospy.Subscriber('/darknet_ros/bounding_boxes',darknetmsg.BoundingBoxes, self.darknet_callback)
 
         #self.pose = message_filters.Subscriber('/seapath/pose',geomsg.PoseStamped)
         #rospy.Subscriber('/ladybug/camera'+str(self.number)+'/image_raw', Image, self.image_callback)
@@ -281,6 +286,65 @@ class DetectObjects(object):
             #ts = message_filters.TimeSynchronizer([self.pose, self.image], 10)
             #ts.registerCallback(self.callback)
 
+    def darknet2_callback(self, msg):
+        num = str(msg).split(': ')
+        _,n = num
+        if int(n) == 0:
+            self.detect_ready = True
+            #print(num, self.count)
+        self.count += 1
+        
+
+    def darknet_callback(self, msg):
+        self.dark_stamp = float(str(msg.header.stamp))/1e9
+        self.dark_image = str(msg.image_header)
+        self.dark_boxes = msg.bounding_boxes
+        #print('DARK   ',self.dark_stamp, self.dark_image, self.dark_boxes)
+        corners = []
+        corner = []
+        h, w = self.image.shape[:2]
+        i = self.index
+        for d in self.dark_boxes:
+            #print ('DARKER',d)
+            dd = (str(d).splitlines())
+            _,obj = str(dd[0]).split(': ')
+            _,prob = str(dd[1]).split(': ')
+            _,xmin = str(dd[2]).split(': ')
+            _,ymin = str(dd[3]).split(': ')
+            _,xmax = str(dd[4]).split(': ')
+            _,ymax = str(dd[5]).split(': ')
+            #obj = obj[1] = obj.split('"')
+            prob = float(prob)
+            xmin = float(xmin) + ((w//3)*i)
+            ymin = float(ymin) + h//3
+            xmax = float(xmax) + ((w//3)*i)
+            ymax = float(ymax) + h//3
+            #xmin = xmin.split(': ')
+            print(obj,prob,xmin, xmax, 'INDEX : ',self.index)
+            if obj == '"boat"':# and prob > 0.2:
+                corners.append([obj,prob,np.array([xmin,ymin,xmax,ymax])]) 
+            #xc, yc, w1, h1 = d[2]
+            #lst = list(d)
+            #print(lst)
+            #lst[2] = ((xc+((w//3)*i)),(yc+((h//3))),w1,h1)
+            #print(lst)
+            #objects.append(lst)
+
+            #corners.append(findobject(objects))
+                #print("CORNERS",corners)
+        if corners is not []:
+            corners.sort(key=lambda x :x[1])
+            corner = np.array(corners[-1][2])
+            print('CORNERRRRRRRRR',corner)
+            self.show_webcam(self.image, corner)
+                #else:
+                #    self.show_webcam(self.image)
+                #corner = np.zeros(4)
+        self.detect_ready = True
+        #self.count += 1
+
+        
+
     def pose_callback(self, msg):
         self.pose_stamp = float(str(msg.header.stamp))/1e9
         self.pose_time = datetime.fromtimestamp(self.pose_stamp)
@@ -295,6 +359,7 @@ class DetectObjects(object):
     def radar_callback(self, msg):
         
         self.radar_stamp = float(str(msg.header.stamp))/1e9
+        #print(self.radar_stamp, self.pose_stamp)
         self.est_track_id = msg.track_id
         self.posterior_pos = msg.posterior.pos_est
         self.posterior_vel = msg.posterior.vel_est
@@ -314,13 +379,13 @@ class DetectObjects(object):
             self.radar_angle_body -= 2*np.pi
         self.radar_pixel = int(self.radar_angle_body/self.fov_pixel)
         #if abs(self.radar_pixel) < (self.width/2):
-        #self.detections.append(self.radar_pixel)
+        self.detections.append(self.radar_pixel)
             #self.radar_img = self.warp.copy()
             #cv2.line(self.warp, (self.radar_pixel, 0), (self.radar_pixel, self.height), (0,255,0), 10)
             #cv2.waitKey(100)
         #print('RADAR_ANGLE',radar_angle_ned, psi, self.radar_angle_body, self.radar_pixel, self.width)
         self.radar_range = np.sqrt(dx**2+dy**2)
-        print(self.radar_range, self.est_track_id, np.rad2deg(self.radar_angle_body), self.radar_pixel)
+        #print(self.est_track_id, self.radar_range, np.rad2deg(self.radar_angle_body), self.radar_pixel)
 
         #print(msg)
         #cv2.imshow('Cam3', self.warp)
@@ -379,6 +444,7 @@ class DetectObjects(object):
         
     def image_callback(self, msg):
         h, w = msg.shape[:2]
+        self.image = msg
         tiles = []
         corners = []
         objects = []
@@ -390,18 +456,32 @@ class DetectObjects(object):
         #tiles.append(msg[h//4:(h//4)*3,0:w])
 
         ## Detect smaller objects
-        tiles.append(msg[h//3:(h//3)*2,0:(w//3)])
-        tiles.append(msg[h//3:(h//3)*2,(w//3):(w//3)*2])
-        tiles.append(msg[h//3:(h//3)*2,(w//3)*2:w])
+        #tiles.append(msg[h//3:(h//3)*2,0:(w//3)])
+        #tiles.append(msg[h//3:(h//3)*2,(w//3):(w//3)*2])
+        #tiles.append(msg[h//3:(h//3)*2,(w//3)*2:w])
         
-        i = self.count%10
-        if i < 3:
+        i = self.index = self.count%3
+        if self.detect_ready:
+            print('_'*int(self.index), self.index)
+            #if i < 3:
             tile = msg[h//3:(h//3)*2,(w//3)*i:(w//3)*i+(w//3)]
-            #for tile in tiles:
-                #cv2.imshow('Tile', tile)
-                #cv2.waitKey(2000)
-           
-            p1p=detector(tile, self.net, self.meta)
+                #for tile in tiles:
+                    #cv2.imshow('Tile', tile)
+                    #cv2.waitKey(2000)
+               
+                #p1p=detector(tile, self.net, self.meta)
+                #### Create CompressedIamge ####
+                #im = Image()
+                #im.header.stamp = self.imagetimestamp# rospy.Time.now()
+                #im.format = "jpeg"
+                #im.data = np.array(cv2.imencode('.jpg', image_np)[1]).tostring()
+            bridge = CvBridge()
+            img = cv2.imread('/home/runar/boat_single.jpg')
+                #cv_image = CvBridge.imgmsg_to_cv2(image_message, desired_encoding="passthrough")
+            im = bridge.cv2_to_imgmsg(tile, 'bgr8')#encoding="passthrough")
+            self.pub_tile.publish(im)
+            self.detect_ready = False
+        '''
             for d in p1p:
                 print (d)
                 xc, yc, w1, h1 = d[2]
@@ -420,10 +500,12 @@ class DetectObjects(object):
             else:
                 self.show_webcam(self.image)
                 #corner = np.zeros(4)
-        else:
-            self.show_webcam(self.image)
+        '''
+        #else:
+        #self.show_webcam(self.image, np.array([100,200,200,250]))
+        self.show_webcam(self.image)
         
-        self.count += 1
+        #self.count += 1
         # Transform coordinate system
         Mounting_angle = 72       # 5 cameras, 360/5=72
 
@@ -431,49 +513,62 @@ class DetectObjects(object):
         phi, theta, psi = self.euler_angles
         #print(self.euler_angles, looking_angle)
         #psi = looking_angle
-        for d in self.cdetections:
+        #for d in self.cdetections:
             #print("DDDD  ",d)
-            cv2.line(self.image, (d+int(w/2), 0), (d+int(w/2), h), (0,255,0), 10) 
+        #    cv2.line(self.image, (d+int(w/2), 0), (d+int(w/2), h), (0,255,0), 10) 
         for d in self.detections:
             #print("CCCC  ",d)
             cv2.line(self.image, (d+int(w/2), 0), (d+int(w/2), h), (255,0,0), 10) 
         self.detections = []
-        self.cdetections = [] 
+        #self.cdetections = [] 
         self.rotate_along_axis(-phi, -theta, -looking_angle)
         #print(corner)
     
     def show_webcam(self, image, corners=None):
         global initialize, boxToDraw#,tracker
-
-        if corners is None:
-            try:
-                boxToDraw = self.tracker.track(image[:,:,::-1], 'Cam')
-            except:
-                print("No Bbox to track")
-
-        else:# all(corners)!=0:
+        #im = self.image.copy()
+        if boxToDraw is None:
+            #print('No Box Yet')
+        #    if corners is None:
+        #        print('No Box Yet')
+        #    else:
+            boxToDraw = corners
+        elif corners is not None:# and boxToDraw is not None:
+            #print("CORNEERSSSSSSSSSSSSSS")
+            #try:
             iou = bb_intersection_over_union(boxToDraw,corners)
             if iou < 0.3:
                 initialize = True
                 print ("UPDATED")
-
-        if initialize and corners is not None:
-            if all(corners)!=0:
+            if initialize:
+                #if all(corners)!=0:
                 boxToDraw = corners
                 initialize = False
-                boxToDraw = self.tracker.track(image[:,:,::-1], 'Cam', boxToDraw)
-
-        elif ((abs(boxToDraw[0]-boxToDraw[2]) > 5) and (abs(boxToDraw[1]-boxToDraw[3]) > 5)):
-            boxToDraw = self.tracker.track(image[:,:,::-1], 'Cam')
-            cv2.rectangle(self.image,
-                (int(boxToDraw[0]), int(boxToDraw[1])),
-                (int(boxToDraw[2]), int(boxToDraw[3])),
-                [0,0,255], 2)
-
-        #else:
-        #    print("TERMINATED")
+                print("NEW_TRACK")
+                boxToDraw = tracker.track(image[:,:,::-1], 'Cam', boxToDraw) 
+            #except:
+            #    print("No Bbox to update")
+        else:# all(corners)!=0:
+            #print('ELSE')
+            try:
+                boxToDraw = tracker.track(image[:,:,::-1], 'Cam')
+                print('BOXXXXX ',boxToDraw)
+                if ((abs(boxToDraw[0]-boxToDraw[2]) > 5) and (abs(boxToDraw[1]-boxToDraw[3]) > 5)):
+                    #boxToDraw = tracker.track(image[:,:,::-1], 'Cam')
+                    cv2.rectangle(self.image,
+                        (int(boxToDraw[0]), int(boxToDraw[1])),
+                        (int(boxToDraw[2]), int(boxToDraw[3])),
+                        [0,0,255], 2)
+            except:
+                print("No Bbox to track")
+             
         
-        cv2.imshow('Cam', self.image)
+            
+        #    else:
+        #        print("TERMINATED")
+        
+        #cv2.imshow('Cam2', im)
+        #cv2.waitKey(1)
         #print (boxToDraw)        
 
 
@@ -683,9 +778,9 @@ class DetectObjects(object):
         
 
     def start(self):
-        self.net = dn.load_net(b"/home/runar/yolov3.cfg", b"/home/runar/yolov3.weights", 0)
-        self.meta = dn.load_meta(b"/home/runar/coco.data")
-        self.tracker = re3_tracker.Re3Tracker()
+        #self.net = dn.load_net(b"/home/runar/yolov3.cfg", b"/home/runar/yolov3.weights", 0)
+        #self.meta = dn.load_meta(b"/home/runar/coco.data")
+        
         #rospy.loginfo("In attesa")
         #print("FOV   ",self.fov_pixel)
         self.number = 0
@@ -697,7 +792,7 @@ class DetectObjects(object):
         #self.height, self.width = self.image.shape[:2]
         #print('WWWWWWW', self.width)
         self.fov_radians = np.deg2rad(100)      #FOV is about 100 deg
-        self.fov_pixel = self.fov_radians/2048#1616.#self.width
+        self.fov_pixel = self.fov_radians/1616#self.width
         self.image_time = str(sorted_file_list[i])
         #print(self.image_time) 
         self.imageNametoTimestamp(self.image_time)
@@ -726,32 +821,32 @@ class DetectObjects(object):
             if (self.imagetimestamp - self.pose_stamp) < -2:
                 i += int(abs(self.imagetimestamp - self.pose_stamp))
                 self.image_time = str(sorted_file_list[i])
-                print("WAY SMALLER",self.imagetimestamp-self.pose_stamp, i) 
+                #print("WAY SMALLER",self.imagetimestamp-self.pose_stamp, i) 
                 self.imageNametoTimestamp(self.image_time)
             elif (self.imagetimestamp - self.pose_stamp) < -0.06:
                 i += 2# + int(abs(self.imagetimestamp - self.pose_stamp))
                 self.image_time = str(sorted_file_list[i])
-                print("SMALLER",self.imagetimestamp-self.pose_stamp, i) 
+                #print("SMALLER",self.imagetimestamp-self.pose_stamp, i) 
                 self.imageNametoTimestamp(self.image_time)
-            elif (self.imagetimestamp - self.pose_stamp) > 0.06:
-                print('LARGER',self.imagetimestamp-self.pose_stamp, i)
+            #elif (self.imagetimestamp - self.pose_stamp) > 0.06:
+                #print('LARGER',self.imagetimestamp-self.pose_stamp, i)
             else:
                 i += 1# + int(abs(self.imagetimestamp - self.pose_stamp))
                 self.image_time = str(sorted_file_list[i])
-                print("GOOD",self.imagetimestamp-self.pose_stamp, i) 
+                #print("GOOD",self.imagetimestamp-self.pose_stamp, i) 
                 self.imageNametoTimestamp(self.image_time)
                 #while self.imagetimestamp > self.pose_stamp:
                 #    break
-            self.image = cv2.imread(im_dir + '/' + sorted_file_list[i])
+            image = cv2.imread(im_dir + '/' + sorted_file_list[i])
             
-            if self.image is None:
+            if image is None:
                 # End of video.
                 print('No image')
             
             else:
                 #cv2.imshow('Cam', self.image)
                 #cv2.waitKey(1)
-                h, w = self.image.shape[:2]
+                h, w = image.shape[:2]
                 #print(h)
 
                 self.focal = 1350
@@ -763,12 +858,12 @@ class DetectObjects(object):
                 self.newcameramtx, roi=cv2.getOptimalNewCameraMatrix(self.mtx,self.distort,(w,h),1,(w,h))
 
                 # crop the image
-                self.cropx, self.cropy = [216, 600]
+                cropx, cropy = [216, 600]
 
-                self.dst = cv2.undistort(self.image, self.mtx, self.distort, None, self.newcameramtx)
-                h, w = self.dst.shape[:2]
-                self.image = self.dst[self.cropy:h-self.cropy, self.cropx:w-self.cropx]
-                self.height, self.width = self.image.shape[:2]
+                dst = cv2.undistort(image, self.mtx, self.distort, None, self.newcameramtx)
+                h, w = dst.shape[:2]
+                image = dst[cropy:h-cropy, cropx:w-cropx]
+                self.height, self.width = image.shape[:2]
                 #self.image = self.bridge.cv2_to_imgmsg(self.cv_image, encoding="passthrough")
                 #self.image.header.stamp = rospy.Time.now()
 
@@ -777,16 +872,16 @@ class DetectObjects(object):
                 #print("IMGSIZE",ret_val,cropx,cropy,w,h, roi, newcameramtx)
                 #h, w = self.dimg.shape[:2]
                 #im = dimg.copy()  
-                self.image_callback(self.image)
+                self.image_callback(image)
 
             #i += 1
-            keyPressed = cv2.waitKey(1)
-            if keyPressed == 27 or keyPressed == 1048603:
-                break  # esc to quit
-            elif keyPressed != -1:
-                paused = True
+            #keyPressed = cv2.waitKey(1)
+            #if keyPressed == 27 or keyPressed == 1048603:
+            #    break  # esc to quit
+            #elif keyPressed != -1:
+            #    paused = True
             #frameNum += 1
-            self.rate.sleep()
+            #self.rate.sleep()
             '''
             self.pub_calib.publish(self.image)
             for self.tile in self.tiles:
@@ -805,6 +900,7 @@ if __name__ == '__main__':
     #cv2.namedWindow('Cam2', cv2.WINDOW_NORMAL)
     cv2.namedWindow('Cam3', cv2.WINDOW_NORMAL) 
     
+    tracker = re3_tracker.Re3Tracker()
     rospy.init_node("CameraTracker")
     # Setup Telemetron ownship tracker
     #telemetron_tf = TransformListener()
