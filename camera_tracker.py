@@ -314,7 +314,7 @@ class DetectObjects(object):
                 print('a sort failed')
             for b in a:
                 #print('b')
-                if b[0] < np.deg2rad(20):  # Only look in +/-20 degree area 
+                if b[0] < np.deg2rad(10):  # Only look in +/-10 degree area 
                     c.append(b)
                     #print('B')
             try:
@@ -552,91 +552,22 @@ class DetectObjects(object):
                     xmax = float(xmax) + ((w//3)*i)
                     ymax = float(ymax) + h//3
                 else:
-                    xmin = float(xmin)*3
-                    ymin = float(ymin)*3*(3/4)
-                    xmax = float(xmax)*3
-                    ymax = float(ymax)*3*(3/4)
+                    xmin = 0#float(xmin)*3
+                    ymin = 0#float(ymin)*3*(3/4)
+                    xmax = 0#float(xmax)*3
+                    ymax = 0#float(ymax)*3*(3/4)
 
                 if obj == '"boat"' and prob > 0.25:
                     if corners is None:
                         corners = []
                     corners.append([obj,prob,np.array([xmin,ymin,xmax,ymax])]) 
         
-        self.detect_ready = True
+        #self.detect_ready = True
         
         #print('RESULT', result.id)
         #print(corners)
         return corners
 
-        #self.darknet = int(ident2)
-
-        #print('RESULT', result.id)
-        #print(result.bounding_boxes.header.stamp)
-        #print(result.bounding_boxes.bounding_boxes)
-        '''
-        self.dark_stamp = float(str(msg.header.stamp))/1e9
-        ident = str(msg.result.id)
-        _,ident2,_ = (str(msg.status.goal_id.id)).split('-')
-        status = msg.status.status
-
-
-        corners = None
-        corner = []
-        h = self.height
-        w = self.width
-        #i = (int(ident2)+1)%4
-        #i = (self.index)
-        i = ident
-        print('iiident: ',ident, self.index)
-        
-        dark_boxes = msg.result.bounding_boxes.bounding_boxes
-        
-        if dark_boxes != []:
-            for d in dark_boxes:
-                #print ('DARKER',d)
-                dd = (str(d).splitlines())
-                _,obj  = str(dd[0]).split(': ')
-                _,prob = str(dd[1]).split(': ')
-                _,xmin = str(dd[2]).split(': ')
-                _,ymin = str(dd[3]).split(': ')
-                _,xmax = str(dd[4]).split(': ')
-                _,ymax = str(dd[5]).split(': ')
-                #obj = obj[1] = obj.split('"')
-                prob = float(prob)
-                print('Prob: ', prob)
-
-                if i < 3:
-                    xmin = float(xmin) + ((w//3)*i)
-                    ymin = float(ymin) + h//3
-                    xmax = float(xmax) + ((w//3)*i)
-                    ymax = float(ymax) + h//3
-                else:
-                    xmin = float(xmin)*3
-                    ymin = float(ymin)*3*(3/4)
-                    xmax = float(xmax)*3
-                    ymax = float(ymax)*3*(3/4)
-
-                if obj == '"boat"' and prob > 0.25:
-                    if corners is None:
-                        corners = []
-                    corners.append([obj,prob,np.array([xmin,ymin,xmax,ymax])]) 
-
-            if corners is not None:
-                corners.sort(reverse = True, key=lambda x :x[1])
-                corner = np.array(corners[0][2])
-                #print('Detected boat: ',corner)
-                self.show_webcam(corner)
-            else:
-                self.show_webcam()
-
-        if status == 3:
-            #self.count += 1
-            self.detect_ready = True
-            self.darknet = int(ident2)
-        else:
-            print('YOLO ERROR STATUS')
-            self.detect_ready = True
-        '''
 
     def image_callback(self, msg):
         #h, w = msg.shape[:2]
@@ -652,7 +583,7 @@ class DetectObjects(object):
         w = self.width
 
         
-        if self.count%5 == 0:#self.detect_ready:
+        if self.count%10 == 0:#self.detect_ready:
             self.show_webcam()
             self.index +=1
             #print(self.index)
@@ -680,7 +611,7 @@ class DetectObjects(object):
             self.show_webcam()
             if self.count%10==0 and self.darknet is None:        # Start detection again if something fails
                 self.detect_ready = True
-        
+            
         for d in self.detections:
             cv2.line(self.warp, (d+int(w/2), 0), (d+int(w/2), h), (255,0,0), 10)
         self.detections = []
@@ -697,9 +628,11 @@ class DetectObjects(object):
         h = self.height
         w = self.width
         global initialize, boxToDraw#,tracker
-        if boxToDraw is None:
-            boxToDraw = corners
-        elif corners is not None:# and boxToDraw is not None:
+        #if boxToDraw is None:
+            #boxToDraw = corners
+        if corners is not None:# and boxToDraw is not None:
+            if boxToDraw is None and all(corners) > 0:
+                boxToDraw = corners
             iou = bb_intersection_over_union(boxToDraw,corners)
             if iou < 0.3:
                 initialize = True
@@ -708,12 +641,11 @@ class DetectObjects(object):
                 initialize = False
                 print("NEW_TRACK")
                 boxToDraw = tracker.track(self.warp[:,:,::-1], 'Cam', boxToDraw) 
-        else:# all(corners)!=0:
+        if boxToDraw is not None:
             try:
                 boxToDraw = tracker.track(self.warp[:,:,::-1], 'Cam')
             except:
                 print("No Bbox to track")
-        if  boxToDraw is not None:
             if ((abs(boxToDraw[0]-boxToDraw[2]) > 4) and (abs(boxToDraw[1]-boxToDraw[3]) > 4)):
                 cv2.rectangle(self.warp, (int(boxToDraw[0]), int(boxToDraw[1])), (int(boxToDraw[2]), int(boxToDraw[3])), 
                     [0,0,255], 2)
