@@ -230,6 +230,8 @@ class DetectObjects(object):
         #self.tile = []
         #self.tiles = []
         self.image = []
+        self.warp = []
+        self.image3 = []
         #self.radar_img = []
         self.millisecond = None
         self.firstimage = None
@@ -266,7 +268,7 @@ class DetectObjects(object):
         #rospy.Subscriber('/mr/spokes', automsg.RadarSpoke, self.spoke_callback )
         #rospy.Subscriber('/darknet_ros/found_object', stdmsg.Int8, self.darknet2_callback)
         #rospy.Subscriber('/darknet_ros/bounding_boxes',darknetmsg.BoundingBoxes, self.darknet_callback)
-        rospy.Subscriber('/darknet_ros/check_for_objects/result',darknetmsg.CheckForObjectsActionResult, self.darknet3_callback)
+        #rospy.Subscriber('/darknet_ros/check_for_objects/result',darknetmsg.CheckForObjectsActionResult, self.darknet3_callback)
         #rospy.Subscriber('/darknet_ros/detection_image', Image, self.darknet_detect_image)
 
         #self.pose = message_filters.Subscriber('/seapath/pose',geomsg.PoseStamped)
@@ -293,7 +295,7 @@ class DetectObjects(object):
 
 
     def data_assosiation(self):
-        print('DATA')
+        #print('DATA')
         a = []
         c = []
         #try:
@@ -312,7 +314,7 @@ class DetectObjects(object):
                 print('a sort failed')
             for b in a:
                 #print('b')
-                if b[0] < 0.1:
+                if b[0] < np.deg2rad(20):  # Only look in +/-20 degree area 
                     c.append(b)
                     #print('B')
             try:
@@ -322,8 +324,8 @@ class DetectObjects(object):
                 self.extended_kalman(c[0][3])
             except:
                 print('c failed')
-        else:
-            print('No radar detections')
+        #else:
+         #   print('No radar detections')
         #except:
         #    print('Radar assosiation error')
         #print('NOE')
@@ -337,15 +339,19 @@ class DetectObjects(object):
 
     def darknet3_callback(self, msg):
         self.dark_stamp = float(str(msg.header.stamp))/1e9
-        #self.ident = str(msg.result.id)
+        ident = str(msg.result.id)
         _,ident2,_ = (str(msg.status.goal_id.id)).split('-')
         status = msg.status.status
 
 
         corners = None
         corner = []
-        h, w = self.image.shape[:2]
-        i = (int(ident2)+1)%4
+        h = self.height
+        w = self.width
+        #i = (int(ident2)+1)%4
+        #i = (self.index)
+        i = ident
+        print('iiident: ',ident, self.index)
         
         dark_boxes = msg.result.bounding_boxes.bounding_boxes
         
@@ -353,7 +359,7 @@ class DetectObjects(object):
             for d in dark_boxes:
                 #print ('DARKER',d)
                 dd = (str(d).splitlines())
-                _,obj = str(dd[0]).split(': ')
+                _,obj  = str(dd[0]).split(': ')
                 _,prob = str(dd[1]).split(': ')
                 _,xmin = str(dd[2]).split(': ')
                 _,ymin = str(dd[3]).split(': ')
@@ -361,6 +367,7 @@ class DetectObjects(object):
                 _,ymax = str(dd[5]).split(': ')
                 #obj = obj[1] = obj.split('"')
                 prob = float(prob)
+                print('Prob: ', prob)
 
                 if i < 3:
                     xmin = float(xmin) + ((w//3)*i)
@@ -373,7 +380,7 @@ class DetectObjects(object):
                     xmax = float(xmax)*3
                     ymax = float(ymax)*3*(3/4)
 
-                if obj == '"boat"':# and prob > 0.2:
+                if obj == '"boat"' and prob > 0.25:
                     if corners is None:
                         corners = []
                     corners.append([obj,prob,np.array([xmin,ymin,xmax,ymax])]) 
@@ -382,9 +389,9 @@ class DetectObjects(object):
                 corners.sort(reverse = True, key=lambda x :x[1])
                 corner = np.array(corners[0][2])
                 #print('Detected boat: ',corner)
-                self.show_webcam(self.image, corner)
+                self.show_webcam(corner)
             else:
-                self.show_webcam(self.image)
+                self.show_webcam()
 
         if status == 3:
             #self.count += 1
@@ -404,53 +411,7 @@ class DetectObjects(object):
         
 
     def darknet_callback(self, msg):
-        self.dark_stamp = float(str(msg.header.stamp))/1e9
-        self.dark_image = str(msg.image_header)
-        self.dark_boxes = msg.bounding_boxes
-        print('DARKER  ',self.index, self.count)
-        #print('DARK   ',self.dark_stamp, self.dark_image, self.dark_boxes)
-        corners = []
-        corner = []
-        h, w = self.image.shape[:2]
-        i = self.index
-        for d in self.dark_boxes:
-            #print ('DARKER',d)
-            dd = (str(d).splitlines())
-            _,obj = str(dd[0]).split(': ')
-            _,prob = str(dd[1]).split(': ')
-            _,xmin = str(dd[2]).split(': ')
-            _,ymin = str(dd[3]).split(': ')
-            _,xmax = str(dd[4]).split(': ')
-            _,ymax = str(dd[5]).split(': ')
-            #obj = obj[1] = obj.split('"')
-            prob = float(prob)
-            xmin = float(xmin) + ((w//3)*i)
-            ymin = float(ymin) + h//3
-            xmax = float(xmax) + ((w//3)*i)
-            ymax = float(ymax) + h//3
-            #xmin = xmin.split(': ')
-            #print(obj,prob,xmin, xmax, 'INDEX : ',self.index)
-            if obj == '"boat"':# and prob > 0.2:
-                corners.append([obj,prob,np.array([xmin,ymin,xmax,ymax])]) 
-            #xc, yc, w1, h1 = d[2]
-            #lst = list(d)
-            #print(lst)
-            #lst[2] = ((xc+((w//3)*i)),(yc+((h//3))),w1,h1)
-            #print(lst)
-            #objects.append(lst)
-
-            #corners.append(findobject(objects))
-                #print("CORNERS",corners)
-        if corners is not []:
-            corners.sort(key=lambda x :x[1])
-            corner = np.array(corners[-1][2])
-            print('CORNER',corner)
-            self.show_webcam(self.image, corner)
-                #else:
-                #    self.show_webcam(self.image)
-                #corner = np.zeros(4)
-        self.detect_ready = True
-        #self.count += 1
+        print('DARKNET feedback:  ', msg)
         
         
 
@@ -498,7 +459,7 @@ class DetectObjects(object):
             [posterior_vel_cov.var_x, posterior_vel_cov.var_y, posterior_vel_cov.cor_xy]]))
         self.detections.append(self.radar_pixel)
 
-        cv2.line(self.warp, (self.radar_pixel, 0), (self.radar_pixel, self.height), (0,255,0), 10)
+        #cv2.line(self.warp, (self.radar_pixel, 0), (self.radar_pixel, self.height), (0,255,0), 10)
         #print('RADAR_ANGLE',radar_angle_ned, psi, self.radar_angle_body, self.radar_angle_image, self.radar_pixel)
 
     def cluster_callback(self, msg):
@@ -552,53 +513,189 @@ class DetectObjects(object):
             #    print(self.intensity)
             #print(self.azimuth)
 
-        
-    def image_callback(self, msg):
-        h, w = msg.shape[:2]
-        self.image = msg
-        tiles = []
-        corners = []
-        objects = []
+    def call_server(self,msg):
+        self.dark_client.wait_for_server()
         bridge = CvBridge()
-        goal = darknetmsg.CheckForObjectsAction
+        im = bridge.cv2_to_imgmsg(msg, 'bgr8')#encoding="passthrough")
+        goal = CheckForObjectsGoal()
+        goal.id = self.index
+        goal.image = im
+        self.dark_client.send_goal(goal, feedback_cb=self.darknet_callback)
+        self.dark_client.wait_for_result()
+        result = self.dark_client.get_result()
 
-        #self.index = int(self.count)%10
-        if self.detect_ready:
-            if self.index>2:
-                im = msg[0:(h//4)*3,0:w]
-                tile = cv2.resize(im,(w//3,h//3))
-                self.index = 0
-                i = 3
-            else:
-                i = self.index
-                self.index +=1
-                tile = msg[h//3:(h//3)*2,(w//3)*i:(w//3)*i+(w//3)]
+        corners = None
+        #corner = []
+        h = self.height
+        w = self.width
+        self.dark_stamp = float(str(result.bounding_boxes.header.stamp))/1e9
+        i = int(result.id)
+        dark_boxes = result.bounding_boxes.bounding_boxes
+        #print(dark_boxes)
+        if dark_boxes != []:
+            for d in dark_boxes:
+                #print ('DARKER',d)
+                dd = (str(d).splitlines())
+                _,obj  = str(dd[0]).split(': ')
+                _,prob = str(dd[1]).split(': ')
+                _,xmin = str(dd[2]).split(': ')
+                _,ymin = str(dd[3]).split(': ')
+                _,xmax = str(dd[4]).split(': ')
+                _,ymax = str(dd[5]).split(': ')
+                #obj = obj[1] = obj.split('"')
+                prob = float(prob)
+                #print('Prob: ', prob)
 
-            self.detect_ready = False
-            #img = cv2.imread('/home/runar/boat_single.jpg')
-            im = bridge.cv2_to_imgmsg(tile, 'bgr8')#encoding="passthrough")
-            
-            goal.id = i#self.count
-            goal.image = im
-            self.dark_client.send_goal(goal)
-            #self.pub_tile.publish(im)
-        else:
-            self.show_webcam(msg)
-            if self.count%10==0 and self.darknet is None:        # Start detection again if something fails
-                self.detect_ready = True
-        self.count += 1
+                if i < 3:
+                    xmin = float(xmin) + ((w//3)*i)
+                    ymin = float(ymin) + h//3
+                    xmax = float(xmax) + ((w//3)*i)
+                    ymax = float(ymax) + h//3
+                else:
+                    xmin = float(xmin)*3
+                    ymin = float(ymin)*3*(3/4)
+                    xmax = float(xmax)*3
+                    ymax = float(ymax)*3*(3/4)
+
+                if obj == '"boat"' and prob > 0.25:
+                    if corners is None:
+                        corners = []
+                    corners.append([obj,prob,np.array([xmin,ymin,xmax,ymax])]) 
         
+        self.detect_ready = True
+        
+        #print('RESULT', result.id)
+        #print(corners)
+        return corners
+
+        #self.darknet = int(ident2)
+
+        #print('RESULT', result.id)
+        #print(result.bounding_boxes.header.stamp)
+        #print(result.bounding_boxes.bounding_boxes)
+        '''
+        self.dark_stamp = float(str(msg.header.stamp))/1e9
+        ident = str(msg.result.id)
+        _,ident2,_ = (str(msg.status.goal_id.id)).split('-')
+        status = msg.status.status
+
+
+        corners = None
+        corner = []
+        h = self.height
+        w = self.width
+        #i = (int(ident2)+1)%4
+        #i = (self.index)
+        i = ident
+        print('iiident: ',ident, self.index)
+        
+        dark_boxes = msg.result.bounding_boxes.bounding_boxes
+        
+        if dark_boxes != []:
+            for d in dark_boxes:
+                #print ('DARKER',d)
+                dd = (str(d).splitlines())
+                _,obj  = str(dd[0]).split(': ')
+                _,prob = str(dd[1]).split(': ')
+                _,xmin = str(dd[2]).split(': ')
+                _,ymin = str(dd[3]).split(': ')
+                _,xmax = str(dd[4]).split(': ')
+                _,ymax = str(dd[5]).split(': ')
+                #obj = obj[1] = obj.split('"')
+                prob = float(prob)
+                print('Prob: ', prob)
+
+                if i < 3:
+                    xmin = float(xmin) + ((w//3)*i)
+                    ymin = float(ymin) + h//3
+                    xmax = float(xmax) + ((w//3)*i)
+                    ymax = float(ymax) + h//3
+                else:
+                    xmin = float(xmin)*3
+                    ymin = float(ymin)*3*(3/4)
+                    xmax = float(xmax)*3
+                    ymax = float(ymax)*3*(3/4)
+
+                if obj == '"boat"' and prob > 0.25:
+                    if corners is None:
+                        corners = []
+                    corners.append([obj,prob,np.array([xmin,ymin,xmax,ymax])]) 
+
+            if corners is not None:
+                corners.sort(reverse = True, key=lambda x :x[1])
+                corner = np.array(corners[0][2])
+                #print('Detected boat: ',corner)
+                self.show_webcam(corner)
+            else:
+                self.show_webcam()
+
+        if status == 3:
+            #self.count += 1
+            self.detect_ready = True
+            self.darknet = int(ident2)
+        else:
+            print('YOLO ERROR STATUS')
+            self.detect_ready = True
+        '''
+
+    def image_callback(self, msg):
+        #h, w = msg.shape[:2]
         looking_angle = np.deg2rad(00+self.Mounting_angle*self.number)
         phi, theta, psi = self.euler_angles
- 
-        for d in self.detections:
-            cv2.line(self.image, (d+int(w/2), 0), (d+int(w/2), h), (255,0,0), 10) 
+        #self.image = msg
+        self.rotate_along_axis(msg,-phi, -theta, -looking_angle)
+        #tiles = []
+        #corners = []
+        #objects = []
+        #goal = darknetmsg.CheckForObjectsAction
+        h = self.height
+        w = self.width
+
         
+        if self.count%5 == 0:#self.detect_ready:
+            self.show_webcam()
+            self.index +=1
+            #print(self.index)
+            if self.index > 3:
+                self.index = 0
+            i = self.index
+            if self.index == 3:
+                im = self.warp[0:(h//4)*3,0:w]
+                tile = cv2.resize(im,(w//3,h//3))
+            else:
+                tile = self.warp[h//3:(h//3)*2,(w//3)*i:(w//3)*i+(w//3)]
+            
+            self.detect_ready = False
+            #img = cv2.imread('/home/runar/boat_single.jpg')
+            corners = self.call_server(tile)
+            if corners is not None:
+                corners.sort(reverse = True, key=lambda x :x[1])
+                corner = np.array(corners[0][2])
+                #print('Detected boat: ',corner)
+                self.show_webcam(corner)
+            else:
+                self.show_webcam()
+            #self.pub_tile.publish(im)
+        else:
+            self.show_webcam()
+            if self.count%10==0 and self.darknet is None:        # Start detection again if something fails
+                self.detect_ready = True
+        
+        for d in self.detections:
+            cv2.line(self.warp, (d+int(w/2), 0), (d+int(w/2), h), (255,0,0), 10)
         self.detections = []
-        self.rotate_along_axis(-phi, -theta, -looking_angle)
+        try:
+            cv2.imshow('Cam3', self.warp)
+            cv2.waitKey(1)
+        except:
+            print('One sec please')
+        self.count += 1
         
 
-    def show_webcam(self, image, corners=None):
+    def show_webcam(self, corners=None):
+        #self.image3 = self.warp.copy()
+        h = self.height
+        w = self.width
         global initialize, boxToDraw#,tracker
         if boxToDraw is None:
             boxToDraw = corners
@@ -610,21 +707,23 @@ class DetectObjects(object):
                 boxToDraw = corners
                 initialize = False
                 print("NEW_TRACK")
-                boxToDraw = tracker.track(image[:,:,::-1], 'Cam', boxToDraw) 
-            else:# all(corners)!=0:
-                try:
-                    boxToDraw = tracker.track(image[:,:,::-1], 'Cam')
-                except:
-                    print("No Bbox to track")
+                boxToDraw = tracker.track(self.warp[:,:,::-1], 'Cam', boxToDraw) 
+        else:# all(corners)!=0:
+            try:
+                boxToDraw = tracker.track(self.warp[:,:,::-1], 'Cam')
+            except:
+                print("No Bbox to track")
+        if  boxToDraw is not None:
             if ((abs(boxToDraw[0]-boxToDraw[2]) > 4) and (abs(boxToDraw[1]-boxToDraw[3]) > 4)):
-                        cv2.rectangle(self.image, (int(boxToDraw[0]), int(boxToDraw[1])), (int(boxToDraw[2]), int(boxToDraw[3])), 
-                            [0,0,255], 2)
-                        self.bb_angle = self.fov_pixel*(int(boxToDraw[0])+(int(boxToDraw[2])-int(boxToDraw[0]))/2-self.width/2)+self.number*np.deg2rad(self.Mounting_angle)
-                        self.data_assosiation()
-                        print('BoundingBox angle: ',self.bb_angle, np.rad2deg(self.bb_angle))
+                cv2.rectangle(self.warp, (int(boxToDraw[0]), int(boxToDraw[1])), (int(boxToDraw[2]), int(boxToDraw[3])), 
+                    [0,0,255], 2)
+                self.bb_angle = self.fov_pixel*(int(boxToDraw[0])+(int(boxToDraw[2])-int(boxToDraw[0]))/2-self.width/2)+self.number*np.deg2rad(self.Mounting_angle)
+                self.data_assosiation()
+                #print('BoundingBox angle: ',self.bb_angle, np.rad2deg(self.bb_angle))
+        
              
         
-    def rotate_along_axis(self, phi=0, theta=0, psi=0, dx=0, dy=0, dz=0):
+    def rotate_along_axis(self, image, phi=0, theta=0, psi=0, dx=0, dy=0, dz=0):
         # Get ideal focal length on z axis
         dz = self.focal*1.
         #axis = np.float32([[3,0,0], [0,3,0], [0,0,3]]).reshape(-1,3)
@@ -632,9 +731,8 @@ class DetectObjects(object):
         # Get projection matrix
         mat = self.get_M(phi, theta, psi, dx, dy, dz)
 
-        self.warp = cv2.warpPerspective(self.image, mat, (self.width, self.height))
-        cv2.imshow('Cam3', self.warp)
-        cv2.waitKey(2)
+        self.warp = cv2.warpPerspective(image, mat, (self.width, self.height))
+        #print('WARP')
         
 
     """ Get Perspective Projection Matrix """
@@ -790,7 +888,7 @@ class DetectObjects(object):
                 self.image_time = str(sorted_file_list[i])
                 #print("SMALLER",self.imagetimestamp-self.pose_stamp, i) 
                 self.imageNametoTimestamp(self.image_time)
-            elif (self.imagetimestamp - self.pose_stamp) > 10:#0.06:
+            elif (self.imagetimestamp - self.pose_stamp) > 20:#0.06:
                 i = 1       # Restart due to bag file restarted
                 #print('LARGER',self.imagetimestamp-self.pose_stamp, i)
             else:
@@ -830,7 +928,7 @@ class DetectObjects(object):
 
 # Main function
 if __name__ == '__main__':
-    #cv2.namedWindow('Cam', cv2.WINDOW_NORMAL)
+    cv2.namedWindow('Cam', cv2.WINDOW_NORMAL)
     #cv2.namedWindow('Cam2', cv2.WINDOW_NORMAL)
     cv2.namedWindow('Cam3', cv2.WINDOW_NORMAL) 
     
