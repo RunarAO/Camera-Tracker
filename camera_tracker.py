@@ -17,6 +17,7 @@ from cv_bridge import CvBridge, CvBridgeError
 #import message_filters
 from datetime import datetime
 import matplotlib.pyplot as plt
+from munkres import Munkres, print_matrix, make_cost_matrix
 
 
 basedir = os.path.dirname(__file__)
@@ -49,7 +50,6 @@ import autoseapy.definitions as defs
 import actionlib
 import darknet_ros_msgs.msg as darknetmsg
 from darknet_ros_msgs.msg import CheckForObjectsAction, CheckForObjectsGoal
-#import darknet_ros_msgs.action as darknetaction
 
 
 np.set_printoptions(precision=6)
@@ -219,16 +219,17 @@ def publish_seapath_pose(msg, llh0=munkholmen):
 class DetectObjects(object):
     def __init__(self):
         # Params
-        self.darknet = None
+        #self.darknet = None
         self.detect_ready = True
         self.count = 0
         self.index = 0
         #self.q_b_w = []
         self.pos = []
         #self.ned = []
-        self.euler_angles = []
+        self.euler_angles = [0,0,0]
         #self.tile = []
         #self.tiles = []
+        self.newimage = False
         self.image = []
         self.warp = []
         self.image3 = []
@@ -242,8 +243,19 @@ class DetectObjects(object):
         self.radar_pixel = 0
         self.detections = []
         self.radar_detections = []
-        self.range = 1000
+        self.range = 100
+        self.track_id = None
         self.bb_angle = 0
+
+        self.focal = 1350
+        self.number = 0
+        self.Mounting_angle = 72       # 5 cameras, 360/5=72
+        self.fov_radians = np.deg2rad(100)      #FOV is about 100 deg
+        self.fov_pixel = self.fov_radians/1616#self.width
+
+        self.matrix = None
+        self.penalty = None
+
         #self.dimg = []
         #self.bridge = CvBridge()
         #with np.load('calib.npz') as X:
@@ -251,19 +263,19 @@ class DetectObjects(object):
         #print(self.mtx, self.dist, self.rvec, self.tvec)
 
         # Node cycle rate (in Hz).
-        self.rate = rospy.Rate(10)
+        #self.rate = rospy.Rate(10)
 
         # Publishers
         #self.pub_tile = rospy.Publisher('/ladybug/object_img/image_raw', Image, queue_size=1)
         #self.pub_goal = rospy.Publisher('/darknet_ros/check_for_objects/goal', darknetmsg.CheckForObjectsActionGoal, queue_size=1)
-        self.dark_client = actionlib.SimpleActionClient('darknet_ros/check_for_objects', darknetmsg.CheckForObjectsAction)
+        #self.dark_client = actionlib.SimpleActionClient('darknet_ros/check_for_objects', darknetmsg.CheckForObjectsAction)
         #self.pub_calib = rospy.Publisher('/ladybug/calib_img/image_calib', Image, queue_size=5)
 
         # Subscribers
-        rospy.Subscriber('/seapath/pose',geomsg.PoseStamped, self.pose_callback)
+        #rospy.Subscriber('/seapath/pose',geomsg.PoseStamped, self.pose_callback)
         #scan_topic = rospy.get_param('~scan_topic', 'radar_scans')
         #rospy.Subscriber('/radar/radar_scans', automsg.RadarScan, self.radar_callback)#, callback_args=(track_publisher, track_manager, telemetron_tf, measurement_covariance_parameters), queue_size=30)
-        rospy.Subscriber('/radar/estimates', automsg.RadarEstimate, self.radar_callback)
+        #rospy.Subscriber('/radar/estimates', automsg.RadarEstimate, self.radar_callback)
         #rospy.Subscriber('/radar/clusters', automsg.RadarCluster, self.cluster_callback)
         #rospy.Subscriber('/mr/spokes', automsg.RadarSpoke, self.spoke_callback )
         #rospy.Subscriber('/darknet_ros/found_object', stdmsg.Int8, self.darknet2_callback)
@@ -272,7 +284,7 @@ class DetectObjects(object):
         #rospy.Subscriber('/darknet_ros/detection_image', Image, self.darknet_detect_image)
 
         #self.pose = message_filters.Subscriber('/seapath/pose',geomsg.PoseStamped)
-        #rospy.Subscriber('/ladybug/camera'+str(self.number)+'/image_raw', Image, self.image_callback)
+        #rospy.Subscriber('/ladybug/camera0/image_raw', Image, self.image_callback)
         #self.cam = cv2.VideoCapture('/home/runar/Ladybug/output0.mp4')
         #self.cam.set(1, 17000-1)
         #ret_val, img = self.cam.read()
@@ -298,11 +310,12 @@ class DetectObjects(object):
         #print('DATA')
         a = []
         c = []
+        e = []
         #try:
         if self.radar_detections != []:
             for d in self.radar_detections:
                 #print('A')
-                a.append([abs(int(d[0])-self.bb_angle), abs(int(d[1])-self.range), self.bb_angle, d])
+                a.append([abs(int(d[0])-self.bb_angle), abs(int(d[1])-self.range), d[2], d])
                 #e[1] = d[1]
                 #e[2] = self.bb_angle
                 #e[3] = d
@@ -314,16 +327,27 @@ class DetectObjects(object):
                 print('a sort failed')
             for b in a:
                 #print('b')
-                if b[0] < np.deg2rad(10):  # Only look in +/-10 degree area 
+                if b[0] < np.deg2rad(10):  # Only look in +/-10 degree area
                     c.append(b)
                     #print('B')
             try:
                 c.sort(key=lambda x:x[1])
-                self.range = c[0][1]
-                print('RANGE: ',self.range)
-                self.extended_kalman(c[0][3])
             except:
-                print('c failed')
+                print('c sort failed')
+            for d in c:
+                if d[2] == self.track_id:
+                    e = [d]+e
+                    #print('e', e)
+                else:
+                    e.append(d)
+            try:
+                self.range = e[0][1]
+                self.track_id = e[0][2]
+                print('RANGE: ',self.range, self.track_id)
+                self.extended_kalman(e[0][3])
+            except:
+                print('data assosiation failed')
+            
         #else:
          #   print('No radar detections')
         #except:
@@ -387,7 +411,8 @@ class DetectObjects(object):
 
             if corners is not None:
                 corners.sort(reverse = True, key=lambda x :x[1])
-                corner = np.array(corners[0][2])
+                for c in corners:
+                    corner.append(np.array(c[0][2]))
                 #print('Detected boat: ',corner)
                 self.show_webcam(corner)
             else:
@@ -427,10 +452,10 @@ class DetectObjects(object):
         #print(self.mtx, self.dist, self.rvec, self.tvec)
 
     def radar_callback(self, msg):
-        #print(msg)
+        #print('RADAR',msg)
         self.radar_stamp = float(str(msg.header.stamp))/1e9
         #print(self.radar_stamp, self.pose_stamp)
-        est_track_id = msg.track_id
+        self.radar_track_id = msg.track_id
         posterior_pos = msg.posterior.pos_est
         posterior_vel = msg.posterior.vel_est
         posterior_pos_cov = msg.posterior.pos_cov
@@ -454,13 +479,14 @@ class DetectObjects(object):
         self.radar_angle_image = self.radar_angle_body - self.number*np.deg2rad(self.Mounting_angle)
         self.radar_pixel = int(self.radar_angle_image/self.fov_pixel)
         self.radar_range = np.sqrt(dx**2+dy**2)
-        self.radar_detections.append(np.array([self.radar_angle_body, self.radar_range, 
+        self.radar_detections.append(np.array([self.radar_angle_body, self.radar_range, self.radar_track_id,
             [posterior_vel.x, posterior_vel.y], [posterior_pos_cov.var_x, posterior_pos_cov.var_y, posterior_pos_cov.cor_xy], 
             [posterior_vel_cov.var_x, posterior_vel_cov.var_y, posterior_vel_cov.cor_xy]]))
         self.detections.append(self.radar_pixel)
 
         #cv2.line(self.warp, (self.radar_pixel, 0), (self.radar_pixel, self.height), (0,255,0), 10)
         #print('RADAR_ANGLE',radar_angle_ned, psi, self.radar_angle_body, self.radar_angle_image, self.radar_pixel)
+        
 
     def cluster_callback(self, msg):
         
@@ -514,13 +540,14 @@ class DetectObjects(object):
             #print(self.azimuth)
 
     def call_server(self,msg):
+        self.dark_client = actionlib.SimpleActionClient('darknet_ros/check_for_objects', darknetmsg.CheckForObjectsAction)
         self.dark_client.wait_for_server()
         bridge = CvBridge()
         im = bridge.cv2_to_imgmsg(msg, 'bgr8')#encoding="passthrough")
         goal = CheckForObjectsGoal()
         goal.id = self.index
         goal.image = im
-        self.dark_client.send_goal(goal, feedback_cb=self.darknet_callback)
+        self.dark_client.send_goal(goal)#, feedback_cb=self.darknet_callback)
         self.dark_client.wait_for_result()
         result = self.dark_client.get_result()
 
@@ -531,7 +558,6 @@ class DetectObjects(object):
         self.dark_stamp = float(str(result.bounding_boxes.header.stamp))/1e9
         i = int(result.id)
         dark_boxes = result.bounding_boxes.bounding_boxes
-        #print(dark_boxes)
         if dark_boxes != []:
             for d in dark_boxes:
                 #print ('DARKER',d)
@@ -552,110 +578,234 @@ class DetectObjects(object):
                     xmax = float(xmax) + ((w//3)*i)
                     ymax = float(ymax) + h//3
                 else:
-                    xmin = 0#float(xmin)*3
-                    ymin = 0#float(ymin)*3*(3/4)
-                    xmax = 0#float(xmax)*3
-                    ymax = 0#float(ymax)*3*(3/4)
+                    xmin = float(xmin)*3
+                    ymin = float(ymin)*3*(3/4)
+                    xmax = float(xmax)*3
+                    ymax = float(ymax)*3*(3/4)
 
                 if obj == '"boat"' and prob > 0.25:
                     if corners is None:
                         corners = []
                     corners.append([obj,prob,np.array([xmin,ymin,xmax,ymax])]) 
-        
-        #self.detect_ready = True
-        
-        #print('RESULT', result.id)
         #print(corners)
         return corners
 
 
     def image_callback(self, msg):
-        #h, w = msg.shape[:2]
-        looking_angle = np.deg2rad(00+self.Mounting_angle*self.number)
-        phi, theta, psi = self.euler_angles
-        #self.image = msg
-        self.rotate_along_axis(msg,-phi, -theta, -looking_angle)
-        #tiles = []
-        #corners = []
-        #objects = []
-        #goal = darknetmsg.CheckForObjectsAction
-        h = self.height
-        w = self.width
+        bridge = CvBridge()
+        img = bridge.imgmsg_to_cv2(msg, "bgr8")
+        h, w = img.shape[:2]
+        #self.focal = 1350
+        #mtx = np.matrix('1350.41716 0.0 1038.58110; 0.0 1352.74467 1219.10680; 0.0 0.0 1.0')
+        self.mtx = np.matrix('1350.0 0.0 1024.0; 0.0 1350.0 1232.0; 0.0 0.0 1.0')
+        #distort = np.array([-0.293594324, 0.0924910801, -0.000795067830, 0.000154218667, -0.0129375553])
+        self.distort = np.array([-0.29, 0.09, -0.0, 0.0, -0.013])
 
+        self.newcameramtx, roi=cv2.getOptimalNewCameraMatrix(self.mtx,self.distort,(w,h),1,(w,h))
+
+        # crop the image
+        cropx, cropy = [216, 600]
+
+        dst = cv2.undistort(img, self.mtx, self.distort, None, self.newcameramtx)
+        h, w = dst.shape[:2]
+        self.image = dst[cropy:h-cropy, cropx:w-cropx]
         
-        if self.count%10 == 0:#self.detect_ready:
-            self.show_webcam()
-            self.index +=1
-            #print(self.index)
-            if self.index > 3:
-                self.index = 0
-            i = self.index
-            if self.index == 3:
-                im = self.warp[0:(h//4)*3,0:w]
-                tile = cv2.resize(im,(w//3,h//3))
-            else:
-                tile = self.warp[h//3:(h//3)*2,(w//3)*i:(w//3)*i+(w//3)]
-            
-            self.detect_ready = False
-            #img = cv2.imread('/home/runar/boat_single.jpg')
-            corners = self.call_server(tile)
-            if corners is not None:
-                corners.sort(reverse = True, key=lambda x :x[1])
-                corner = np.array(corners[0][2])
-                #print('Detected boat: ',corner)
-                self.show_webcam(corner)
-            else:
-                self.show_webcam()
-            #self.pub_tile.publish(im)
-        else:
-            self.show_webcam()
-            if self.count%10==0 and self.darknet is None:        # Start detection again if something fails
-                self.detect_ready = True
-            
-        for d in self.detections:
-            cv2.line(self.warp, (d+int(w/2), 0), (d+int(w/2), h), (255,0,0), 10)
-        self.detections = []
-        try:
-            cv2.imshow('Cam3', self.warp)
-            cv2.waitKey(1)
-        except:
-            print('One sec please')
-        self.count += 1
+        self.height, self.width = self.image.shape[:2]
+        self.newimage = True
+        
         
 
-    def show_webcam(self, corners=None):
+    def show_webcam(self, image, corners=None):
         #self.image3 = self.warp.copy()
+        box = {}
+        i = 0
         h = self.height
         w = self.width
         global initialize, boxToDraw#,tracker
-        #if boxToDraw is None:
-            #boxToDraw = corners
-        if corners is not None:# and boxToDraw is not None:
-            if boxToDraw is None and all(corners) > 0:
-                boxToDraw = corners
-            iou = bb_intersection_over_union(boxToDraw,corners)
-            if iou < 0.3:
-                initialize = True
-            if initialize:
-                boxToDraw = corners
-                initialize = False
-                print("NEW_TRACK")
-                boxToDraw = tracker.track(self.warp[:,:,::-1], 'Cam', boxToDraw) 
-        if boxToDraw is not None:
+
+        #size = 10#max(len(corners), len(bboxes))
+        #likely = [1]*size
+        #if bboxes == [[]]:
+        #    bboxes[0] = bbox
+        #print('CORNERS',corners)
+        #print('BBBBBB',bboxes)
+        #m = Munkres()
+        #initialize = True
+        if self.matrix is None:
+            self.penalty = np.zeros([10])
+            self.matrix = np.ones([len(self.penalty), len(self.penalty)])*1000#np.inf  ## max 10 different boats
+
+        #cost = cost*math.inf
+        #print('COST',cost)
+        if corners is not None:
+            #print('CORN',corners)
+            if boxToDraw is None:# and all(corners) > 0:
+                boxToDraw = {}
+                i = 0
+                for c in corners:
+                    #print('CCC',c)
+                    boxToDraw[i] = c
+                    #print(boxToDraw)
+                    i += 1
+                #boxToDraw = [x for x in corners]
+            #else:
+            for ckey in range(len(corners)):
+            #for ckey, cvalue in enumerate(corners):
+                cvalue = corners[ckey]
+                #print ('C',ckey,cvalue)
+                for bkey in boxToDraw:
+                    iou = 1000
+                    #try:
+                    bvalue = boxToDraw[bkey]
+                    try:
+                        if all(bvalue) == 0:
+                            break
+                    except:
+                        print()
+                    #print (bkey,bvalue)
+                    if ((abs(bvalue[0]-bvalue[2]) > 4) and (abs(bvalue[1]-bvalue[3]) > 4)):
+                        iou = bb_intersection_over_union(bvalue,cvalue)
+                        if iou != 0:
+                            self.matrix[bkey][ckey] = -iou
+                        else:
+                            self.matrix[bkey][ckey] = 9
+                    else:
+                        boxToDraw[bkey] = [0,0,0,0]
+                    #except:
+                    #    print('bkey error')
+
+                    #elif iou < 0.2:
+                    #    box[bkey] = corners[ckey]
+                    #elif iou < 0.2:
+                        #initialize = True
+                    #    print("Updated track") 
+                    #else:#if initialize:
+                    #    boxToDraw[bkey] = corners[ckey]
+                        #initialize = False
+                    #    print(boxToDraw)
+
+
+                    
+            #print(self.matrix)
+            #cost_matrix = make_cost_matrix(self.matrix, lambda cost: sys.maxsize - cost)
+            #print(cost_matrix)
+            m = Munkres()
+            indexes = m.compute(self.matrix)
+            #print(indexes)
+            size = min(len(boxToDraw),len(corners))
+            for a,b in indexes:
+            #    if a > size or b > size:
+            #        break
+            #    else:
+                #for a, b in ind:
+                try:
+                    if self.matrix[a][b] < -0.2:
+                        self.penalty[b] = 0
+                    else:
+                        boxToDraw[b] = corners[a]
+                        for c in boxToDraw:
+                            iou = bb_intersection_over_union(boxToDraw[b],boxToDraw[c])
+                            if iou > 0.5 and c != b:
+                                boxToDraw[c] = [0,0,0,0]
+                except:
+                    print()
+            #print(boxToDraw.keys(), box)
+            bboxes = tracker.multi_track(image[:,:,::-1], boxToDraw.keys(), boxToDraw)
+            #print('From tracker',bboxes)
+            i = 0
+            for b in box:
+                boxToDraw[b] = bboxes[i]
+                i += 1
+            #print(boxToDraw)
+        
+        # if min(len(corners), len(bboxes))>0:
+        #     if not np.array(bboxes).size:
+        #         print('NO BKEY')
+        #         bboxes = [x for x in corners]
+        #         #num = [x for x in range(len(corners))]
+        #         matrix = np.identity(size)*0.1
+        #         #print('NUM',num,bboxes)
+        #     for bkey, bvalue in enumerate(bboxes):#zip(num, bboxes):
+        #         if not np.array(corners).size:
+        #             initialize = False
+        #             print('NO CKEY')
+        #             corners = [x for x in bboxes]
+        #             matrix = np.identity(size)*0.1
+        #             #print('CST',matrix)
+        #         for ckey, cvalue in enumerate(corners):
+        #             iou = bb_intersection_over_union(bvalue,cvalue)
+        #             matrix[ckey][bkey] = iou
+        #             #print (cost)
+        #             #print('COST', cost)
+        #             #print('INDEX',ckey,bkey)
+        #     cost_matrix = make_cost_matrix(matrix, lambda cost: sys.maxsize - cost)
+        #     m = Munkres()
+
+        #     indexes = m.compute(cost_matrix)
+        #     #print_matrix(cost, msg='Lowest cost through this matrix:')
+        #     print('ind',indexes)
+        #     #total = 0
+        
+        # #if boxToDraw is None:
+        #     #boxToDraw = corners
+        # if corners is not None:# and boxToDraw is not None:
+        #     if boxToDraw is None:# and all(corners) > 0:
+        #         boxToDraw = corners
+        #     iou = 0#bb_intersection_over_union(boxToDraw,corners)
+        #     if iou == 0:
+        #         initialize = True
+        #         print("New track")
+        #     elif iou < 0.2:
+        #         initialize = True
+        #         print("Updated track") 
+        #     if initialize:
+        #         boxToDraw = corners
+        #         initialize = False
+        #         boxToDraw = tracker.multi_track(image[:,:,::-1], ['Cam'], {'Cam':boxToDraw})
+        #         print(boxToDraw)
+        
+        else:
             try:
-                boxToDraw = tracker.track(self.warp[:,:,::-1], 'Cam')
+                bboxes = tracker.multi_track(image[:,:,::-1], boxToDraw.keys())
+                i = 0
+                for b in box:
+                    boxToDraw[b] = bboxes[i]
+                    i += 1
             except:
                 print("No Bbox to track")
-            if ((abs(boxToDraw[0]-boxToDraw[2]) > 4) and (abs(boxToDraw[1]-boxToDraw[3]) > 4)):
-                cv2.rectangle(self.warp, (int(boxToDraw[0]), int(boxToDraw[1])), (int(boxToDraw[2]), int(boxToDraw[3])), 
-                    [0,0,255], 2)
-                self.bb_angle = self.fov_pixel*(int(boxToDraw[0])+(int(boxToDraw[2])-int(boxToDraw[0]))/2-self.width/2)+self.number*np.deg2rad(self.Mounting_angle)
-                self.data_assosiation()
-                #print('BoundingBox angle: ',self.bb_angle, np.rad2deg(self.bb_angle))
-        
-             
+        if boxToDraw is not None:
+            if any(boxToDraw) != 0:
+                for a in boxToDraw:
+                    b = boxToDraw[a]
+                    #print(a,b)
+                    if ((abs(b[0]-b[2]) > 4) and (abs(b[1]-b[3]) > 4)):
+                        cv2.rectangle(self.draw, (int(b[0]), int(b[1])), (int(b[2]), int(b[3])), 
+                            [0,0,255], 2)
+                        self.bb_angle = self.fov_pixel*(int(b[0])+(int(b[2])-int(b[0]))/2-self.width/2)+self.number*np.deg2rad(self.Mounting_angle)
+                        self.data_assosiation()
+                        #print('BoundingBox angle: ',self.bb_angle, np.rad2deg(self.bb_angle))
+                #for b in boxToDraw:
+                    self.penalty[a] += 1
+                    if self.penalty[a] > 50:        # If no detections for X iterations. Remove track
+                        boxToDraw[a] = [0,0,0,0]
+                        self.penalty[a] = 0
+                    #print(a,self.penalty[a])
+
+            
+    def pixel_2_angle(self, x, y, z=1):
+        x_angle = x*self.fov_pixel-(self.width/2)*self.fov_pixel+np.deg2rad(self.Mounting_angle)
+        y_angle = y*self.fov_pixel-(self.height/2)*self.fov_pixel
+        z_angle = z
+        return [x_angle, y_angle, x_angle] 
+
+    def angle_2_pixel(self, rx, ry, rz=0):
+        x = (rx/self.fov_pixel)+(self.width/2)-np.deg2rad(self.Mounting_angle*self.fov_pixel)
+        y = (ry/self.fov_pixel)+(self.height/2)
+        z = 1
+        return [x, y, z]
         
     def rotate_along_axis(self, image, phi=0, theta=0, psi=0, dx=0, dy=0, dz=0):
+        self.warppose = self.euler_angles
         # Get ideal focal length on z axis
         dz = self.focal*1.
         #axis = np.float32([[3,0,0], [0,3,0], [0,0,3]]).reshape(-1,3)
@@ -664,15 +814,17 @@ class DetectObjects(object):
         mat = self.get_M(phi, theta, psi, dx, dy, dz)
 
         self.warp = cv2.warpPerspective(image, mat, (self.width, self.height))
+        self.draw = self.warp.copy()
         #print('WARP')
         
 
     """ Get Perspective Projection Matrix """
-    def get_M(self, phi, theta, psi, dx=0, dy=0, dz=0):
-        
-        w = self.width
-        h = self.height
-        f = self.focal
+    def get_M(self, phi, theta, psi, dx=0, dy=0, dz=0, w=None, h=None, f=None):
+
+        if w is None:
+            w=self.width
+            h=self.height
+            f=self.focal
 
         # Projection 2D -> 3D matrix
         A1 = np.array([ [1, 0, -w/2],
@@ -686,25 +838,7 @@ class DetectObjects(object):
                         [-1, 0, 0, 0],
                         [0, 0, 0, 1]])
         
-        # Rotation matrices around the X, Y, and Z axis
-        RX = np.array([ [1, 0, 0, 0],
-                        [0, np.cos(phi), -np.sin(phi), 0],
-                        [0, np.sin(phi), np.cos(phi), 0],
-                        [0, 0, 0, 1]])
-        
-        RY = np.array([ [np.cos(theta), 0, -np.sin(theta), 0],
-                        [0, 1, 0, 0],
-                        [np.sin(theta), 0, np.cos(theta), 0],
-                        [0, 0, 0, 1]])
-        
-        RZ = np.array([ [np.cos(psi), -np.sin(psi), 0, 0],
-                        [np.sin(psi), np.cos(psi), 0, 0],
-                        [0, 0, 1, 0],
-                        [0, 0, 0, 1]])
-
-        # Composed rotation matrix with (RX, RY, RZ)
-        R = np.dot(np.dot(RX, RY), RZ)
-        #print(R,RX,RY,RZ)
+        R = self.rotation_3D(phi, theta, psi)
 
         # Translation matrix
         T = np.array([  [1, 0, 0, dx],
@@ -723,6 +857,27 @@ class DetectObjects(object):
         # Final transformation matrix
         return np.dot(A2, np.dot(T, np.dot(RCB, A1)))
         #return R
+
+    def rotation_3D(self, phi, theta, psi):
+        # Rotation matrices around the X, Y, and Z axis
+        RX = np.array([ [1, 0, 0, 0],
+                        [0, np.cos(phi), -np.sin(phi), 0],
+                        [0, np.sin(phi), np.cos(phi), 0],
+                        [0, 0, 0, 1]])
+        
+        RY = np.array([ [np.cos(theta), 0, -np.sin(theta), 0],
+                        [0, 1, 0, 0],
+                        [np.sin(theta), 0, np.cos(theta), 0],
+                        [0, 0, 0, 1]])
+        
+        RZ = np.array([ [np.cos(psi), -np.sin(psi), 0, 0],
+                        [np.sin(psi), np.cos(psi), 0, 0],
+                        [0, 0, 1, 0],
+                        [0, 0, 0, 1]])
+
+        # Composed rotation matrix with (RX, RY, RZ)
+        return np.dot(np.dot(RX, RY), RZ)
+        #print(R,RX,RY,RZ)
 
     def draw(self, corners, imgpts):
         corner = tuple(corners[0].ravel())
@@ -789,14 +944,17 @@ class DetectObjects(object):
         
           
     def start(self):
+        # Subscribers
+        rospy.Subscriber('/seapath/pose',geomsg.PoseStamped, self.pose_callback)
+        rospy.Subscriber('/radar/estimates', automsg.RadarEstimate, self.radar_callback)
+        rospy.Subscriber('/ladybug/camera0/image_raw', Image, self.image_callback)
         #self.net = dn.load_net(b"/home/runar/yolov3.cfg", b"/home/runar/yolov3.weights", 0)
         #self.meta = dn.load_meta(b"/home/runar/coco.data")
         
         #rospy.loginfo("In attesa")
 
-        self.number = 0
-        self.Mounting_angle = 72       # 5 cameras, 360/5=72
-
+        
+        '''
         im_dir = "/home/runar/Skrivebord/0"
         file_list = os.listdir(im_dir)
         sorted_file_list = sorted(file_list)#, key=lambda x:x[-30:])
@@ -804,12 +962,104 @@ class DetectObjects(object):
         self.cam = cv2.VideoCapture('/home/runar/Ladybug/output0.mp4')
         #self.cam.set(1, 17000)
         
-        self.fov_radians = np.deg2rad(100)      #FOV is about 100 deg
-        self.fov_pixel = self.fov_radians/1616#self.width
+        
         self.image_time = str(sorted_file_list[i])
         self.imageNametoTimestamp(self.image_time)
- 
+        '''
+        
         while not rospy.is_shutdown():
+            corner = []
+            if self.newimage == True:
+                self.newimage = False
+                self.looking_angle = np.deg2rad(00+self.Mounting_angle*self.number)
+                phi, theta, psi = self.euler_angles
+                self.rotate_along_axis(self.image, -phi, -theta, -self.looking_angle)
+                
+                h = self.height
+                w = self.width
+                self.count+=1
+                if self.count%5 == 0:#self.detect_ready:
+                    self.yolo_image = self.warp.copy()
+                    self.index +=1
+                    #print(self.index)
+                    if self.index > 2:
+                        self.index = 0
+                    i = self.index
+                    #if self.index == 3:
+                    #    im = self.warp[0:(h//4)*3,0:w]
+                    #    tile = cv2.resize(im,(w//3,h//3))
+                    #else:
+                    tile = self.warp[h//3:(h//3)*2,(w//3)*i:(w//3)*i+(w//3)]
+                    
+                    #self.detect_ready = False
+                    #img = cv2.imread('/home/runar/boat_single.jpg')
+                    
+                    self.yolopose = self.warppose
+                    corners = self.call_server(tile)
+
+                    if corners is not None:
+                        corners.sort(reverse = True, key=lambda x :x[1])
+                        #print(corners)
+                        for c in corners:
+                            if corner == []:
+                                corner = [np.array(c[2])]
+                            else:
+                                corner.append(np.array(c[2]))
+                        '''
+                        cornerpose = self.rotation_3D(self.yolopose[0]-self.euler_angles[0], self.yolopose[1]-self.euler_angles[1], self.yolopose[2]-self.euler_angles[2])
+                        A1 = np.array([ [1, 0, 0, 0],
+                                        [0, 1, 0, 0],
+                                        [0, 0, 1, 0]])
+                        A2 = np.array([ [1, 0, 0],
+                                        [0, 1, 0],
+                                        [0, 0, 1],
+                                        [0, 0, 0]])
+                        pose = np.dot(np.dot(A1,cornerpose),A2)
+                        print(pose)
+                        cxymin = self.pixel_2_angle(corner[0], corner[1], 1)
+                        cxymax = self.pixel_2_angle(corner[2], corner[3], 1)
+                        rmin = np.dot(pose,cxymin)
+                        rmax = np.dot(pose,cxymax)
+                        xymin = self.angle_2_pixel(rmin[0],rmin[1],rmin[2])
+                        xymax = self.angle_2_pixel(rmax[0],rmax[1],rmax[2])
+                        #print(rmin,rmax,cxymin,cxymax)
+                        corner = [xymin[0],xymin[1], xymax[0],xymax[1]]
+                        print(corner)
+                        '''
+                        #print('Detected boat: ',corner)
+                        self.show_webcam(self.yolo_image, corner)
+                    else:
+                        self.show_webcam(self.warp)
+
+                else:
+                    self.show_webcam(self.warp)
+                    
+                for d in self.detections:
+                    cv2.line(self.draw, (d+int(w/2), 0), (d+int(w/2), h), (255,0,0), 10)
+                self.detections = []
+                # A1 = np.array([ [1, 0, 0, 0],
+                #                 [0, 1, 0, 0],
+                #                 [0, 0, 1, 0]])
+                # A2 = np.array([ [1, 0, 0],
+                #                 [0, 1, 0],
+                #                 [0, 0, 1],
+                #                 [0, 0, 0]])
+                mat2 = self.get_M(-(phi), -(theta), -(psi),0,0,1,0,0,1)
+                #pose = np.dot(np.dot(A1,mat2),A2)
+                p1 = np.dot(mat2,[np.deg2rad(-50),np.deg2rad(5),np.deg2rad(-5)])
+                p2 = np.dot(mat2,[np.deg2rad(50),np.deg2rad(5),np.deg2rad(5)])
+                print(p1,p2)
+                p1 = self.angle_2_pixel(p1[0],p1[1],p1[2])
+                p2 = self.angle_2_pixel(p2[0],p2[1],p2[2])
+                print(p1,p2)
+                cv2.line(self.draw, (int(p1[0]),int(p1[1])), (int(p2[0]),int(p2[1])), (0,255,0),2)
+                #self.data_assosiation()
+                cv2.imshow('Cam3', self.draw)
+                cv2.waitKey(1)
+                self.count += 1
+                #print(self.count)
+        #rospy.spin()
+        '''    
             if (self.imagetimestamp - self.pose_stamp) < -2:
                 i += int(abs(self.imagetimestamp - self.pose_stamp))
                 self.image_time = str(sorted_file_list[i])
@@ -831,7 +1081,7 @@ class DetectObjects(object):
 
             image = cv2.imread(im_dir + '/' + sorted_file_list[i])
             #ret_val, image = self.cam.read()
-
+            
             if image is None:
                 # End of video.
                 print('No image')
@@ -852,15 +1102,15 @@ class DetectObjects(object):
                 h, w = dst.shape[:2]
                 image = dst[cropy:h-cropy, cropx:w-cropx]
                 self.height, self.width = image.shape[:2]
- 
-                self.image_callback(image)
-
-        cv2.destroyAllWindows()
+        '''
+            #self.image_callback(image)
+            
+        #cv2.destroyAllWindows()
 
 
 # Main function
 if __name__ == '__main__':
-    cv2.namedWindow('Cam', cv2.WINDOW_NORMAL)
+    #cv2.namedWindow('Cam', cv2.WINDOW_NORMAL)
     #cv2.namedWindow('Cam2', cv2.WINDOW_NORMAL)
     cv2.namedWindow('Cam3', cv2.WINDOW_NORMAL) 
     
