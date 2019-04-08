@@ -109,8 +109,9 @@ class SendImage(object):
                 #print("SMALLER",self.imagetimestamp-self.pose_stamp, i) 
                 self.imageNametoTimestamp(self.image_time)
             elif (self.imagetimestamp - self.pose_stamp) > 0.06:
-                i = 1       # Restart due to bag file restarted
-                print('LARGER',self.imagetimestamp-self.pose_stamp, i)
+                if (self.imagetimestamp - self.pose_stamp) > 10:
+                    i = 1       # Restart due to bag file restarted
+                    print('LARGER',self.imagetimestamp-self.pose_stamp, i)
             else:
                 i += 1# + int(abs(self.imagetimestamp - self.pose_stamp))
                 self.image_time = str(sorted_file_list[i])

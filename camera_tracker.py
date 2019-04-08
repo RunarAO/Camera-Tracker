@@ -61,27 +61,6 @@ initialize = True
 
 
 
-'''
-def yolo_boxes_to_corners(bbox):
-    """Convert xc, yc, w, h to xmin, ymin, xmax, ymax along last axis
-    """
-    box = []
-    box2 = np.zeros(4)
-    for b in bbox[2]:
-        box.append(b)
-    xc = box[0]
-    yc = box[1]
-    w  = box[2]
-    h  = box[3]
-    box2[0] = xc - w/2
-    box2[1] = yc - h/2
-    box2[2] = xc + w/2
-    box2[3] = yc + h/2
-
-    bbox[2] = box2
-    return bbox
-'''
-
 def bb_intersection_over_union(boxA, boxB):
     # determine the (x, y)-coordinates of the intersection rectangle
     xA = max(boxA[0], boxB[0])
@@ -101,120 +80,7 @@ def bb_intersection_over_union(boxA, boxB):
    
     return iou
 
-'''
-def detector(image, net=0, meta=0, thresh=0.3):
-    
-    detect = dn.detect(net, meta, image, thresh)
-    #detect = rospy.Publisher('image', darknetaction.CheckForObjects, queue_size=5)
-    #detect = darknetmsg.BoundingBoxes([])
-    #pub = rospy.Publisher('/ladybug/object_img/image_raw', Image, queue_size=15)
-    #pub.publish(image)
-    #detect = darknetmsg.BoundingBox()
-    #detect = DetectObjects(image)
-    #self._as = actionlib.SimpleActionServer(self._action_name, actionlib_tutorials.msg.FibonacciAction, execute_cb=self.execute_cb, auto_start = False)
-    #self._as.start()
-    print ('DETECTTTTTTTTTTTTT',detect)
-    cv2.imshow("Cam2",image)
-    cv2.waitKey(200)
-    return detect
 
-    
-def findobject(detect):
-    corners = []#[0]*4#, [0], [0], [0]]
-    #print('DeTeCt',detect)
-    try:
-        for d in detect:
-            #print(d)
-            if d[0] == b'boat':
-                corners = (yolo_boxes_to_corners(d))
-    except:
-        print('NONETYPE')
-    return corners
-'''
-'''
-def Horizon(self,image):
-    lines = []
-    #imgOg = cv2.imread(str(directory)+image) # Read image
-    reduced = cv2.resize(image, (400, 400), interpolation = cv2.INTER_AREA)
-    img_gray = cv2.cvtColor(reduced, cv2.COLOR_BGR2GRAY)
-    blur = cv2.GaussianBlur(img_gray,(9,9),0)            # Perform a gaussian blur
-    edges = cv2.Canny(blur,50,150,apertureSize = 3)
-    #lines = cv2.HoughLinesP(edges,1,np.pi/180,100,80,10)
-    lines = cv2.HoughLinesP(edges,rho = 1,theta = 1*np.pi/180,threshold = 100,minLineLength = 100,maxLineGap = 50)
-    try:
-    #for i in range(N):
-        for x1,y1,x2,y2 in lines[0]:
-            cv2.line(reduced,(x1,y1),(x2,y2),(0,255,0),2)
-            np.arctan2((x2-x1),(y2-y1))
-    except:
-        print('OHNO')
-    cv2.imshow('Cam2',reduced)
-    plt.plot_date(x=days, y=impressions, fmt="r-")
-    
-    #img_YUV = cv2.cvtColor(reduced,cv2.COLOR_BGR2YCR_CB)  # Convert from BGR to YCRCB
-    #b, r, g = cv2.split(img_YUV)                        # Split into blue-green-red channels
-    #b = b*0
-    #r = r*0
-    #g = g*0
-    #imgBlueEqu = cv2.merge((cv2.equalizeHist(b), cv2.equalizeHist(r), cv2.equalizeHist(g))) # Equalize Blue Channel & Merge channels back
-    #img_BGR = cv2.cvtColor(imgBlueEqu,cv2.COLOR_YCR_CB2BGR)  # Convert from YCRCB to BGR
-
-    blur = cv2.GaussianBlur(img_BGR,(9,9),0)            # Perform a gaussian blur
-    b, r, g = cv2.split(blur)                        # Split into blue-green-red channels
-    #b = b*0
-    r = r*0
-    g = g*0
-    blur2 = cv2.merge((cv2.equalizeHist(b), r, g)) # Equalize Blue Channel & Merge channels back
-    img_GREY = cv2.cvtColor(blur2,cv2.COLOR_BGR2GRAY)    # Convert to Greyscale
-
-    ret, thresh = cv2.threshold(b,60,100,cv2.THRESH_BINARY) # Threshold image to segment sky
-
-    # Perform erosian and dialiation to isolate the sky
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT,(5,5), (3,3))
-    img_erode = cv2.erode(thresh, kernel)
-    img_dilate = cv2.dilate(img_erode, kernel)
-
-    img, contours, hierarchy = cv2.findContours(img_dilate,cv2.RETR_LIST,cv2.CHAIN_APPROX_NONE)
-
-    contour_sizes = [(cv2.contourArea(contour), contour) for contour in contours]
-    cv2.imshow('Cam2', thresh)
-    #cv2.imshow('Cam3', blur2)
-    if len(contour_sizes) > 0:
-        biggest_contour = max(contour_sizes, key=lambda x: x[0])[1]
-        #print "\t"+str(image)+"\t"+str(cv2.contourArea(biggest_contour))+" \t\tPASS"
-        #if output != 0:
-        #final = cv2.drawContours(imgOg, biggest_contour, -1, (0,255,0), 3) # Outline elements that may be the sky
-            #cv2.imwrite(output+"H_"+image,final)               # Write to file
-        
-        return biggest_contour
-    #else:
-        #print "\t"+str(image)+"\t\t\tFAIL"
-'''   
-'''
-def inverse_transform(pos, quat):
-    pos_np = np.array([pos.x, pos.y, pos.z])
-    q_np = conv.quaternion(quat.x, quat.y, quat.z, quat.w)
-    (pos_inv, q_inv) = conv.quat_inverse_transform(pos_np, q_np)
-    return pos_inv, q_inv
-
-def publish_seapath_pose(msg, llh0=munkholmen):
-    #global pos
-    pos = msg.pose.position
-    quat = msg.pose.orientation
-    (pos_inv, q_inv) = inverse_transform(pos, quat)
-    # coordinate transform from world to body
-    broadcaster = tf.TransformBroadcaster()
-    broadcaster.sendTransform(tuple(pos_inv), tuple(q_inv), msg.header.stamp, defs.world_seapath, defs.body_seapath)
-    # coordinate transform from surface to body
-    q_b_w = np.array([quat.x, quat.y, quat.z, quat.w])
-    #global euler_angles 
-    euler_angles = conv.quaternion_to_euler_angles(q_b_w)
-    #return euler_angles
-    #q_w_s = conv.euler_angles_to_quaternion(np.array([0,0,-euler_angles[2]]))
-    #q_s_b = conv.quat_conj(conv.quat_mul(q_w_s, q_b_w))
-    #broadcaster.sendTransform((0,0,0), tuple(q_s_b), msg.header.stamp, defs.surface_seapath, defs.body_seapath)
-    #broadcaster.sendTransform((0,0,0), tuple(q_w_s), msg.header.stamp, defs.NED_seapath, defs.surface_seapath)
-'''
 
 class DetectObjects(object):
     def __init__(self):
@@ -254,7 +120,7 @@ class DetectObjects(object):
         self.fov_pixel = self.fov_radians/1616#self.width
 
         self.matrix = None
-        self.penalty = None
+        self.penalty = np.zeros([100])
 
         #self.dimg = []
         #self.bridge = CvBridge()
@@ -616,157 +482,141 @@ class DetectObjects(object):
         
 
     def show_webcam(self, image, corners=None):
-        #self.image3 = self.warp.copy()
         box = {}
-        i = 0
+        #i = 0
         h = self.height
         w = self.width
         global initialize, boxToDraw#,tracker
 
-        #size = 10#max(len(corners), len(bboxes))
-        #likely = [1]*size
-        #if bboxes == [[]]:
-        #    bboxes[0] = bbox
-        #print('CORNERS',corners)
-        #print('BBBBBB',bboxes)
-        #m = Munkres()
-        #initialize = True
+        
+        '''    
         if self.matrix is None:
+            #boxToDraw = {}
             self.penalty = np.zeros([10])
-            self.matrix = np.ones([len(self.penalty), len(self.penalty)])*1000#np.inf  ## max 10 different boats
+            self.matrix = np.ones([10, 10])*1000#np.inf  ## max 10 different boats
+            #for i in range(len(self.penalty)):
+            #    boxToDraw[i] = [0,0,0,0]
+        '''
 
-        #cost = cost*math.inf
-        #print('COST',cost)
         if corners is not None:
-            #print('CORN',corners)
             if boxToDraw is None:# and all(corners) > 0:
                 boxToDraw = {}
                 i = 0
                 for c in corners:
-                    #print('CCC',c)
                     boxToDraw[i] = c
-                    #print(boxToDraw)
                     i += 1
-                #boxToDraw = [x for x in corners]
-            #else:
+            size = max(len(boxToDraw),len(corners))
+            if size > len(self.penalty):
+                size = len(self.penalty)
+            self.matrix = np.ones([size, size])#np.inf  ## max 10 different boats
+            print(len(boxToDraw),len(corners))
             for ckey in range(len(corners)):
-            #for ckey, cvalue in enumerate(corners):
                 cvalue = corners[ckey]
-                #print ('C',ckey,cvalue)
+                #print(cvalue)
+                ckey_given_value = False
+                new = False
                 for bkey in boxToDraw:
-                    iou = 1000
-                    #try:
+                    if ckey_given_value:
+                        break
+                    self.b = bkey
                     bvalue = boxToDraw[bkey]
-                    try:
-                        if all(bvalue) == 0:
-                            break
-                    except:
-                        print()
-                    #print (bkey,bvalue)
+                    iou = 1
+                    #print(bvalue)
+                    #try:
+                    #    if all(bvalue) == -1:
+                    #        self.matrix[bkey][ckey] = 99
+                    #        break
+                    #except:
+                    #    print()
                     if ((abs(bvalue[0]-bvalue[2]) > 4) and (abs(bvalue[1]-bvalue[3]) > 4)):
                         iou = bb_intersection_over_union(bvalue,cvalue)
-                        if iou != 0:
-                            self.matrix[bkey][ckey] = -iou
+                        if iou == 0:
+                            #print(iou)
+                            try:
+                                new = True
+                                self.penalty[bkey] += 1
+                                #print('PENALTY',bkey,self.penalty)
+                                if self.penalty[bkey] > 50:        # If no detections for X iterations. Remove track
+                                    boxToDraw[bkey] = [0,0,0,0]
+                                    box[bkey] = [0,0,0,0]
+                                    self.penalty[bkey] = 0
+                                self.matrix[bkey][ckey] = 0
+                            except:
+                                break#print('OverFlow')
                         else:
-                            self.matrix[bkey][ckey] = 9
+                            new = False
+                            try:
+                                self.matrix[bkey][ckey] = -iou
+                                self.penalty[bkey] = 0
+                            except:
+                                break#print('OVERflow')
                     else:
-                        boxToDraw[bkey] = [0,0,0,0]
-                    #except:
-                    #    print('bkey error')
+                        try:
+                            boxToDraw[bkey] = corners[ckey]
+                            self.matrix[bkey][ckey] = -1
+                            ckey_given_value = True
+                            new = False
+                        except:
+                            break#print('overFLOW')
+                            
+                if new:
+                    boxToDraw[self.b+1] = corners[ckey]
+                    box[self.b+1] = corners[ckey]
+                    if self.matrix.shape[0] < len(boxToDraw):
+                        self.matrix = self.matrix[..., np.newaxis]
+                    try:
+                        self.matrix[self.b+1][ckey] = -0.5
+                    except:
+                        break#print('overflow')
 
-                    #elif iou < 0.2:
-                    #    box[bkey] = corners[ckey]
-                    #elif iou < 0.2:
-                        #initialize = True
-                    #    print("Updated track") 
-                    #else:#if initialize:
-                    #    boxToDraw[bkey] = corners[ckey]
-                        #initialize = False
-                    #    print(boxToDraw)
 
-
-                    
-            #print(self.matrix)
-            #cost_matrix = make_cost_matrix(self.matrix, lambda cost: sys.maxsize - cost)
-            #print(cost_matrix)
             m = Munkres()
+            #print(self.matrix)
             indexes = m.compute(self.matrix)
-            #print(indexes)
-            size = min(len(boxToDraw),len(corners))
+            #print(self.matrix)
+            print(indexes)
+            #size = min(len(boxToDraw),len(corners))
             for a,b in indexes:
-            #    if a > size or b > size:
-            #        break
-            #    else:
-                #for a, b in ind:
-                try:
-                    if self.matrix[a][b] < -0.2:
-                        self.penalty[b] = 0
-                    else:
-                        boxToDraw[b] = corners[a]
-                        for c in boxToDraw:
-                            iou = bb_intersection_over_union(boxToDraw[b],boxToDraw[c])
-                            if iou > 0.5 and c != b:
+                if a > len(corners)-1:
+                    break
+                #elif b > len(boxToDraw)-1 and boxToDraw[b] != [0,0,0,0]:
+                #    box[b] = corners[a]
+                else:
+                    boxToDraw[b] = corners[a]
+
+                if self.matrix[a][b] < -0.2:
+                    self.penalty[b] = 0
+                elif self.matrix[a][b] > 0:
+                    print('no_good')
+                else:
+                    box[b] = corners[a]
+                    for c in boxToDraw:
+                        if c != b:
+                            iou = bb_intersection_over_union(box[b],boxToDraw[c])
+                            if iou > 0.3:
                                 boxToDraw[c] = [0,0,0,0]
-                except:
-                    print()
-            #print(boxToDraw.keys(), box)
-            bboxes = tracker.multi_track(image[:,:,::-1], boxToDraw.keys(), boxToDraw)
+                                box[c] = [0,0,0,0]
+
+                #except:
+                #    print()
+
+            bboxes = tracker.multi_track(image[:,:,::-1], boxToDraw.keys(), box)
             #print('From tracker',bboxes)
             i = 0
-            for b in box:
+            for b in boxToDraw:
                 boxToDraw[b] = bboxes[i]
                 i += 1
-            #print(boxToDraw)
-        
-        # if min(len(corners), len(bboxes))>0:
-        #     if not np.array(bboxes).size:
-        #         print('NO BKEY')
-        #         bboxes = [x for x in corners]
-        #         #num = [x for x in range(len(corners))]
-        #         matrix = np.identity(size)*0.1
-        #         #print('NUM',num,bboxes)
-        #     for bkey, bvalue in enumerate(bboxes):#zip(num, bboxes):
-        #         if not np.array(corners).size:
-        #             initialize = False
-        #             print('NO CKEY')
-        #             corners = [x for x in bboxes]
-        #             matrix = np.identity(size)*0.1
-        #             #print('CST',matrix)
-        #         for ckey, cvalue in enumerate(corners):
-        #             iou = bb_intersection_over_union(bvalue,cvalue)
-        #             matrix[ckey][bkey] = iou
-        #             #print (cost)
-        #             #print('COST', cost)
-        #             #print('INDEX',ckey,bkey)
-        #     cost_matrix = make_cost_matrix(matrix, lambda cost: sys.maxsize - cost)
-        #     m = Munkres()
 
-        #     indexes = m.compute(cost_matrix)
-        #     #print_matrix(cost, msg='Lowest cost through this matrix:')
-        #     print('ind',indexes)
-        #     #total = 0
-        
-        # #if boxToDraw is None:
-        #     #boxToDraw = corners
-        # if corners is not None:# and boxToDraw is not None:
-        #     if boxToDraw is None:# and all(corners) > 0:
-        #         boxToDraw = corners
-        #     iou = 0#bb_intersection_over_union(boxToDraw,corners)
-        #     if iou == 0:
-        #         initialize = True
-        #         print("New track")
-        #     elif iou < 0.2:
-        #         initialize = True
-        #         print("Updated track") 
-        #     if initialize:
-        #         boxToDraw = corners
-        #         initialize = False
-        #         boxToDraw = tracker.multi_track(image[:,:,::-1], ['Cam'], {'Cam':boxToDraw})
-        #         print(boxToDraw)
-        
         else:
             try:
-                bboxes = tracker.multi_track(image[:,:,::-1], boxToDraw.keys())
+                box = boxToDraw
+                for bkey in boxToDraw:
+                    self.penalty[bkey] += 1
+                    if self.penalty[bkey] > 50:
+                        boxToDraw[bkey] = [0,0,0,0]
+                        del box[bkey]
+                        self.penalty[bkey] = 0
+                bboxes = tracker.multi_track(image[:,:,::-1], box.keys())
                 i = 0
                 for b in box:
                     boxToDraw[b] = bboxes[i]
@@ -782,14 +632,10 @@ class DetectObjects(object):
                         cv2.rectangle(self.draw, (int(b[0]), int(b[1])), (int(b[2]), int(b[3])), 
                             [0,0,255], 2)
                         self.bb_angle = self.fov_pixel*(int(b[0])+(int(b[2])-int(b[0]))/2-self.width/2)+self.number*np.deg2rad(self.Mounting_angle)
-                        self.data_assosiation()
-                        #print('BoundingBox angle: ',self.bb_angle, np.rad2deg(self.bb_angle))
-                #for b in boxToDraw:
-                    self.penalty[a] += 1
-                    if self.penalty[a] > 50:        # If no detections for X iterations. Remove track
-                        boxToDraw[a] = [0,0,0,0]
-                        self.penalty[a] = 0
-                    #print(a,self.penalty[a])
+                        #self.data_assosiation()
+
+                    
+
 
             
     def pixel_2_angle(self, x, y, z=1):
@@ -978,10 +824,9 @@ class DetectObjects(object):
                 h = self.height
                 w = self.width
                 self.count+=1
-                if self.count%5 == 0:#self.detect_ready:
+                if self.count%1 == 0:#self.detect_ready:
                     self.yolo_image = self.warp.copy()
                     self.index +=1
-                    #print(self.index)
                     if self.index > 2:
                         self.index = 0
                     i = self.index
@@ -990,8 +835,7 @@ class DetectObjects(object):
                     #    tile = cv2.resize(im,(w//3,h//3))
                     #else:
                     tile = self.warp[h//3:(h//3)*2,(w//3)*i:(w//3)*i+(w//3)]
-                    
-                    #self.detect_ready = False
+
                     #img = cv2.imread('/home/runar/boat_single.jpg')
                     
                     self.yolopose = self.warppose
@@ -999,7 +843,6 @@ class DetectObjects(object):
 
                     if corners is not None:
                         corners.sort(reverse = True, key=lambda x :x[1])
-                        #print(corners)
                         for c in corners:
                             if corner == []:
                                 corner = [np.array(c[2])]
@@ -1037,75 +880,21 @@ class DetectObjects(object):
                 for d in self.detections:
                     cv2.line(self.draw, (d+int(w/2), 0), (d+int(w/2), h), (255,0,0), 10)
                 self.detections = []
-                # A1 = np.array([ [1, 0, 0, 0],
-                #                 [0, 1, 0, 0],
-                #                 [0, 0, 1, 0]])
-                # A2 = np.array([ [1, 0, 0],
-                #                 [0, 1, 0],
-                #                 [0, 0, 1],
-                #                 [0, 0, 0]])
+
                 mat2 = self.get_M(-(phi), -(theta), -(psi),0,0,1,0,0,1)
-                #pose = np.dot(np.dot(A1,mat2),A2)
+
                 p1 = np.dot(mat2,[np.deg2rad(-50),np.deg2rad(5),np.deg2rad(-5)])
                 p2 = np.dot(mat2,[np.deg2rad(50),np.deg2rad(5),np.deg2rad(5)])
-                print(p1,p2)
+                #print(p1,p2)
                 p1 = self.angle_2_pixel(p1[0],p1[1],p1[2])
                 p2 = self.angle_2_pixel(p2[0],p2[1],p2[2])
-                print(p1,p2)
+                #print(p1,p2)
                 cv2.line(self.draw, (int(p1[0]),int(p1[1])), (int(p2[0]),int(p2[1])), (0,255,0),2)
                 #self.data_assosiation()
                 cv2.imshow('Cam3', self.draw)
                 cv2.waitKey(1)
                 self.count += 1
-                #print(self.count)
-        #rospy.spin()
-        '''    
-            if (self.imagetimestamp - self.pose_stamp) < -2:
-                i += int(abs(self.imagetimestamp - self.pose_stamp))
-                self.image_time = str(sorted_file_list[i])
-                #print("WAY SMALLER",self.imagetimestamp-self.pose_stamp, i) 
-                self.imageNametoTimestamp(self.image_time)
-            elif (self.imagetimestamp - self.pose_stamp) < -0.06:
-                i += 2# + int(abs(self.imagetimestamp - self.pose_stamp))
-                self.image_time = str(sorted_file_list[i])
-                #print("SMALLER",self.imagetimestamp-self.pose_stamp, i) 
-                self.imageNametoTimestamp(self.image_time)
-            elif (self.imagetimestamp - self.pose_stamp) > 20:#0.06:
-                i = 1       # Restart due to bag file restarted
-                #print('LARGER',self.imagetimestamp-self.pose_stamp, i)
-            else:
-                i += 1# + int(abs(self.imagetimestamp - self.pose_stamp))
-                self.image_time = str(sorted_file_list[i])
-                #print("GOOD",self.imagetimestamp-self.pose_stamp, i) 
-                self.imageNametoTimestamp(self.image_time)
 
-            image = cv2.imread(im_dir + '/' + sorted_file_list[i])
-            #ret_val, image = self.cam.read()
-            
-            if image is None:
-                # End of video.
-                print('No image')
-            else:
-                h, w = image.shape[:2]
-                self.focal = 1350
-                #mtx = np.matrix('1350.41716 0.0 1038.58110; 0.0 1352.74467 1219.10680; 0.0 0.0 1.0')
-                self.mtx = np.matrix('1350.0 0.0 1024.0; 0.0 1350.0 1232.0; 0.0 0.0 1.0')
-                #distort = np.array([-0.293594324, 0.0924910801, -0.000795067830, 0.000154218667, -0.0129375553])
-                self.distort = np.array([-0.29, 0.09, -0.0, 0.0, -0.013])
-
-                self.newcameramtx, roi=cv2.getOptimalNewCameraMatrix(self.mtx,self.distort,(w,h),1,(w,h))
-
-                # crop the image
-                cropx, cropy = [216, 600]
-
-                dst = cv2.undistort(image, self.mtx, self.distort, None, self.newcameramtx)
-                h, w = dst.shape[:2]
-                image = dst[cropy:h-cropy, cropx:w-cropx]
-                self.height, self.width = image.shape[:2]
-        '''
-            #self.image_callback(image)
-            
-        #cv2.destroyAllWindows()
 
 
 # Main function
