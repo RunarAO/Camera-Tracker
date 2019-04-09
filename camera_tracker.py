@@ -780,7 +780,7 @@ class DetectObjects(object):
 
             
     def pixel_2_angle(self, x, y, z=1):
-        x_angle = x*self.fov_pixel-(self.width/2)*self.fov_pixel
+        x_angle = x*self.fov_pixel-(self.width/2)*self.fov_pixel+np.deg2rad(self.Mounting_angle)
         y_angle = y*self.fov_pixel-(self.height/2)*self.fov_pixel
         z_angle = z
         return [x_angle, y_angle, x_angle] 
@@ -798,37 +798,35 @@ class DetectObjects(object):
         #axis = np.float32([[3,0,0], [0,3,0], [0,0,3]]).reshape(-1,3)
 
         # Get projection matrix
-        mat = self.get_M(phi, theta, psi, dx, dy, dz)
-        self.warp = image#cv2.warpPerspective(image, mat, (self.width, self.height))
+        self.mat = self.get_M(phi, theta, psi, dx, dy, dz)
+
+        self.warp = cv2.warpPerspective(image, self.mat, (self.width, self.height))
         self.draw = self.warp.copy()
         #print('WARP')
         
 
     """ Get Perspective Projection Matrix """
-    def get_M(self, phi, theta, psi, dx=0, dy=0, dz=None, w=None, h=None, f=None):
-        d1 = 0
-        #CB = np.eye(4)
+    def get_M(self, phi, theta, psi, dx=0, dy=0, dz=0, w=None, h=None, f=None):
+
         if w is None:
             w=self.width
             h=self.height
             f=self.focal
-        if dz is None:
-            dz = self.focal
-            d1 = 1
-        
-        # Transform from image coordinate to body
-        CB = np.array([ [0, 1, 0, 0],
-                        [0, 0, -1, 0],
-                        [-1, 0, 0, 0],
-                        [0, 0, 0, 1]])
 
         # Projection 2D -> 3D matrix
         A1 = np.array([ [1, 0, -w/2],
                         [0, 1, -h/2],
                         [0, 0, 1],
-                        [0, 0, d1]])
+                        [0, 0, 1]])
+
+        # Transform from image coordinate to body
+        CB = np.array([ [0, 1, 0, 0],
+                        [0, 0, -1, 0],
+                        [-1, 0, 0, 0],
+                        [0, 0, 0, 1]])
         
         R = self.rotation_3D(phi, theta, psi)
+        R2 = self.rotation_3D(0,-psi,0)     # Rotate image back onto imageplane
 
         # Translation matrix
         T = np.array([  [1, 0, 0, dx],
@@ -843,9 +841,9 @@ class DetectObjects(object):
 
         # Composed rotation matrix with (CB, R, CBinv)
         RCB = np.dot(np.dot(CB,R),CB.transpose())
-        #print(R)
+
         # Final transformation matrix
-        return np.dot(A2, np.dot(T, np.dot(RCB, A1)))
+        return np.dot(A2, np.dot(T, np.dot(R2,np.dot(RCB, A1))))
         #return R
 
     def rotation_3D(self, phi, theta, psi):
@@ -866,7 +864,7 @@ class DetectObjects(object):
                         [0, 0, 0, 1]])
 
         # Composed rotation matrix with (RX, RY, RZ)
-        return np.dot(np.dot(RX, RY), RZ)
+        return np.dot(RX, np.dot(RY, RZ))
         #print(R,RX,RY,RZ)
 
     def draw(self, corners, imgpts):
@@ -970,7 +968,9 @@ class DetectObjects(object):
                 camera_mounting_offset = 3
                 phi, theta, psi = self.euler_angles
                 self.rotate_along_axis(self.image, -phi, -theta, -self.looking_angle)
-                
+                #self.warp = self.image
+                #self.draw = self.image.copy()
+
                 h = self.height
                 w = self.width
                 self.count+=1
@@ -988,7 +988,7 @@ class DetectObjects(object):
 
                     #img = cv2.imread('/home/runar/boat_single.jpg')
                     
-                    self.yolopose = self.warppose
+                    #self.yolopose = self.warppose
                     #corners = self.call_server(tile)
 
                     if corners is not None:
@@ -1030,66 +1030,41 @@ class DetectObjects(object):
                 for d in self.detections:
                     cv2.line(self.draw, (d+int(w/2), 0), (d+int(w/2), h), (255,0,0), 10)
                 self.detections = []
-                #self.looking_angle
-                for s in range(-8, 9):
-                    mat2 = self.get_M(0.05, 0.1, s*np.pi/8, 0,0,0,0,0,1)
-                    print(mat2, s*np.pi/8)
-                mat2 = self.get_M(phi, theta, self.looking_angle, 0,0,0,0,0,1)
-                #ime = np.eye(2)
-                #im = np.array([1,1])
-                #print(ime, im)
-                #im2 = cv2.warpPerspective(im, mat2, (2, 2))
-                rx = np.dot(mat2,[1,0,0])[1]
-                tx = np.dot(mat2,[0,0,1])[1]
-                rot = phi*np.cos(self.looking_angle)+theta*np.sin(self.looking_angle)
-                trans = -phi*np.sin(self.looking_angle)+theta*np.cos(self.looking_angle)
-                print(mat2,self.looking_angle)
-                print(rx,phi,rot)
-                print(tx,theta,trans)
-
-
-                #print(im2)
-                #print(np.dot(mat2,[0,h/2,self.looking_angle]))
-                #print(np.dot(mat2,[w,h/2,self.looking_angle]))
-                #cv2.line(self.draw, (int(p01[0]),int(p01[1])), (int(p02[0]),int(p02[1])), (0,255,0),2)
-                '''
-                print(np.dot(mat2,[0,1,0]))
-                print(np.dot(mat2,[1,1,0]))
-                print(np.dot(mat2,[0,0,1]))
-                print(np.dot(mat2,[0,1,1]))
-                print(np.dot(mat2,[1,0,0]))
-                print(np.dot(mat2,[1,0,1]))
-                '''
-                #p1 = np.dot(mat2,[-1,0,0])
-                #p2 = np.dot(mat2,[1,0,0])
-                p1 = [-1,]
-                #p1 = np.dot(mat2,[tx, ty, self.looking_angle+np.deg2rad(-50+camera_mounting_offset)])
-                #p2 = np.dot(mat2,[np.deg2rad(-60+camera_mounting_offset),ty, x])
-                #p2 = np.dot(mat2,[tx, ty, self.looking_angle+np.deg2rad(50+camera_mounting_offset)])
-                #p4 = np.dot(mat2,[np.deg2rad(60+camera_mounting_offset),ty, x])
-                #p5 = np.dot(mat2,[np.deg2rad(120+camera_mounting_offset),ty, x])
-                #p3 = np.dot(mat2,[-ty,-tx, np.deg2rad(90+camera_mounting_offset)])
-                #p4 = np.dot(mat2,[tx,-ty, np.deg2rad(180+camera_mounting_offset)])
-                #print(p1,p2)
-                p1 = self.angle_2_pixel(p1[0],p1[1],p1[2])
-                p2 = self.angle_2_pixel(p2[0],p2[1],p2[2])
-                #p3 = self.angle_2_pixel(p3[0],p3[1],p3[2])
-                #p4 = self.angle_2_pixel(p4[0],p4[1],p4[2])
-                #p5 = self.angle_2_pixel(p5[0],p5[1],p5[2])
-                #p6 = self.angle_2_pixel(p6[0],p6[1],p6[2])
-                #print(p1,p2)
+                print(self.mat)
+                print(np.dot(self.mat,[1,0,0]))
+                rx = np.dot(self.mat,[100,0,0])[1]
+                tx = np.dot(self.mat,[0,0,1])[1]
                 
+                
+                #mat2 = self.get_M((phi), (theta+np.deg2rad(0)), -self.looking_angle,0,0,0,0,0,1)
+                mat3 = self.get_M(np.pi/8, np.pi/12, np.pi/2,0,0,0,0,0,1)
+                print(mat3)
+                '''
+                p1 = np.dot(mat2,[np.deg2rad(-90+camera_mounting_offset),tx,-rx*self.looking_angle])
+                p2 = np.dot(mat2,[np.deg2rad(0),tx,-rx*self.looking_angle])
+                p3 = np.dot(mat2,[np.deg2rad(90+camera_mounting_offset),tx,-rx*self.looking_angle])
+                #print(p1,p2)
+                '''
+                p1 = self.angle_2_pixel(-np.pi,tx,0)#(p1[0],p1[1],p1[2])
+                p2 = self.angle_2_pixel(0,tx,0)#(p2[0],p2[1],p2[2])
+                p3 = self.angle_2_pixel(np.pi,tx,0)#(p3[0],p3[1],p3[2])
+                #print(p1,p2)
                 cv2.line(self.draw, (int(p1[0]),int(p1[1])), (int(p2[0]),int(p2[1])), (0,255,0),2)
-                #cv2.line(self.draw, (int(p2[0]),int(p2[1])), (int(p3[0]),int(p3[1])), (0,255,0),2)
-                #cv2.line(self.draw, (int(p3[0]),int(p3[1])), (int(p4[0]),int(p4[1])), (0,255,0),2)
-                #cv2.line(self.draw, (int(p4[0]),int(p4[1])), (int(p1[0]),int(p1[1])), (0,255,0),2)
-                #cv2.line(self.draw, (int(p5[0]),int(p5[1])), (int(p6[0]),int(p6[1])), (0,255,0),2)
-                #cv2.line(self.draw, (int(p6[0]),int(p6[1])), (int(p1[0]),int(p1[1])), (0,255,0),2)
-                
+                cv2.line(self.draw, (int(p2[0]),int(p2[1])), (int(p3[0]),int(p3[1])), (0,255,0),2)
                 #self.data_assosiation()
                 cv2.imshow('Cam3', self.draw)
                 cv2.waitKey(1)
                 self.count += 1
+
+                '''
+                [[ 0.92388   0.369644  0.099046]
+                 [-0.382683  0.892399  0.239118]
+                 [ 0.       -0.258819  0.965926]]   # 0 deg
+
+                [[ 0.099046  0.369644 -0.92388 ]
+                 [ 0.239118  0.892399  0.382683]
+                 [ 0.965926 -0.258819  0.      ]]   # 90 deg
+                '''
 
 
 
