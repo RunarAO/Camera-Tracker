@@ -50,6 +50,9 @@ class SendImage(object):
 
     def pose_callback(self, msg):
         self.pose_stamp = float(str(msg.header.stamp))/1e9
+        quat = msg.pose.orientation
+        q_b_w = np.array([quat.x, quat.y, quat.z, quat.w])
+        self.euler_angles = conv.quaternion_to_euler_angles(q_b_w)
 
 
     def imageNametoTimestamp(self, stamp):
@@ -87,7 +90,7 @@ class SendImage(object):
         self.number = 0
         self.Mounting_angle = 72       # 5 cameras, 360/5=72
 
-        im_dir = "/home/runar/Skrivebord/0"
+        im_dir = "/home/runar/Skrivebord/4"
         file_list = os.listdir(im_dir)
         sorted_file_list = sorted(file_list)#, key=lambda x:x[-30:])
         i = 1#4300
@@ -112,13 +115,16 @@ class SendImage(object):
                 if (self.imagetimestamp - self.pose_stamp) > 10:
                     i = 1       # Restart due to bag file restarted
                     print('LARGER',self.imagetimestamp-self.pose_stamp, i)
+                    self.image_time = str(sorted_file_list[i])
+                    self.imageNametoTimestamp(self.image_time)
             else:
                 i += 1# + int(abs(self.imagetimestamp - self.pose_stamp))
                 self.image_time = str(sorted_file_list[i])
                 #print("GOOD",self.imagetimestamp-self.pose_stamp, i) 
+                #print(self.euler_angles)
                 self.imageNametoTimestamp(self.image_time)
 
-            image = cv2.imread(im_dir + '/' + sorted_file_list[i])
+            image = cv2.imread(im_dir + '/' + sorted_file_list[i-51]) #51 fits 11.50 bag
             #ret_val, image = self.cam.read()
             #cv2.imshow('Cam',image)
             #cv2.waitKey(1)

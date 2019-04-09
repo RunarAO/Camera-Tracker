@@ -18,6 +18,7 @@ from cv_bridge import CvBridge, CvBridgeError
 from datetime import datetime
 import matplotlib.pyplot as plt
 from munkres import Munkres, print_matrix, make_cost_matrix
+import numdifftools as nd
 
 
 basedir = os.path.dirname(__file__)
@@ -80,8 +81,120 @@ def bb_intersection_over_union(boxA, boxB):
    
     return iou
 
+class ExtendedKalman():
+    """
+    Nonlinear Kalman Filter Implementation
+    """
+    def __init__(self,initialObservation, numSensors, sensorNoise, stateTransitionFunction, sensorTransferFunction, processNoise, processNoiseCovariance):
+        self.numSensors = numSensors
+        self.estimate = initialObservation  #current estimate, initialized with first observation
+        self.previousEstimate = initialObservation  #previous state's estimate, initialized with first observation
+        self.gain = np.identity(numSensors) #tradeoff of system between estimation and observation, initialized arbitrarily at identity
+        self.previousGain = np.identity(numSensors)  #previous gain, again arbitarily initialized
+        self.errorPrediction = np.identity(numSensors) #current estimation of the signal error,... starts as identity arbitrarily
+        self.previousErrorPrediction = np.identity(numSensors)  #previous signal error, again arbitrary initialization
+        self.sensorNoiseProperty = sensorNoise #variance of sensor noise
+        self.f = stateTransitionFunction #state-transition function, from user input
+        self.fJac = nd.Jacobian(self.f) #jacobian of f
+        self.h = sensorTransferFunction  #sensor transfer function, from user input
+        self.hJac = nd.Jacobian(self.h) #jacobian of h
+        self.processNoise = processNoise;  #process noise
+        self.Q = processNoiseCovariance #process noise covariance
+
+    def predict(self):
+        """
+        Called first.
+        Predicts estimate and error prediction according to model of the situation
+        """
+        #update current state
+        self.estimate = self.f(self.previousEstimate) + self.processNoise
+
+        #find current jacobian value
+        jacVal = self.fJac(self.previousEstimate) + self.processNoise
+
+        #update error prediction state
+        self.errorPrediction = np.dot(jacVal , np.dot(self.previousErrorPrediction,np.transpose(jacVal))) + self.Q
+
+    def update(self,currentObservation):
+        """
+        Called second.
+        Updates estimate according to combination of observed and prediction.
+        Also updates our learning parameters of gain and errorprediction.
+        """
+        #update the current estimate based on the gain
+        self.estimate = self.estimate + np.dot(self.gain,(currentObservation - self.h(self.estimate)))
+        #find current jacobian value
+        jacVal = self.hJac(self.estimate)
+
+        #update the gain based on results from hte previous attempt at estimating
+        invVal = np.dot(jacVal, np.dot(self.errorPrediction, np.transpose(jacVal))) + self.sensorNoiseProperty
+        self.gain = np.dot(self.errorPrediction, np.dot(np.transpose(jacVal) , np.linalg.inv(invVal) ))
+        #update error prediction based on our success
+        self.errorPrediction = np.dot((np.identity(self.numSensors) - np.dot(self.gain, jacVal)), self.errorPrediction)
+
+        #update variables for next round
+        self.previousEstimate = self.estimate
+        self.previousGain = self.gain
+        self.previousErrorPrediction = self.errorPrediction;
+
+    def getEstimate(self):
+        """
+        Simple getter for cleanliness
+        """
+        return self.estimate
 
 
+    '''
+    #variables governing the simulation
+    numSamples = 100
+
+    #our sensor simulators ... voltmeter and ammeter
+    voltmeter = sensors.Voltmeter(0,3)
+    ammeter = sensors.Ammeter(0,2)
+    #and their associated state transfer functions, sensor transfer functions, and noise values
+    stateTransfer = lambda x: np.array([[math.pow(x[0][0],1.01)],[math.pow(x[1][0],.99)+5]]) 
+    sensorTransfer = lambda x: x 
+    sensorNoise = np.array([[math.pow(3,2),0],[0,math.pow(2,2)]])
+    processNoise = np.array([[0],[0]])
+    processNoiseCovariance = np.array([[.1,0],[0,.1]])
+
+    #result log holders
+    x_vals = []
+    volt_vals = []
+    current_vals = []
+    r_vals = []
+    ekfv_vals = []
+    ekfc_vals = []
+    ekfr_vals = []
+
+    #finally grab initial readings
+    voltVal = voltmeter.getData()
+    currentVal = ammeter.getData()
+    #put them in a column vector
+    initialReading = np.array([[voltVal],[currentVal]])  #values are column vectors
+    #and initialize our filter with our initial reading, our 2 sensors, and all of the associated data
+    kf = ExtendedKalman(initialReading,2,sensorNoise,stateTransfer,sensorTransfer, processNoise, processNoiseCovariance)
+
+    #now run the simulation
+    for i in range(numSamples)[1:]:
+        #grab data
+        voltVal = voltmeter.getData() 
+        currentVal = ammeter.getData()  
+        reading = np.array([[voltVal],[currentVal]])  #values are column vectors
+
+        #predict & update
+        kf.predict()
+        kf.update(reading)
+
+        #grab result for this iteration and figure out a resistance value
+        myEstimate = kf.getEstimate()
+        voltage_guess = myEstimate[0][0]
+        current_guess = myEstimate[1][0]
+        current_resistance = voltage_guess / current_guess
+
+
+
+    '''
 class DetectObjects(object):
     def __init__(self):
         # Params
@@ -114,13 +227,17 @@ class DetectObjects(object):
         self.bb_angle = 0
 
         self.focal = 1350
-        self.number = 0
+        self.number = 4
         self.Mounting_angle = 72       # 5 cameras, 360/5=72
         self.fov_radians = np.deg2rad(100)      #FOV is about 100 deg
         self.fov_pixel = self.fov_radians/1616#self.width
 
         self.matrix = None
         self.penalty = np.zeros([100])
+
+        # Estimation parameter of EKF
+        self.Q = np.diag([0.1, 0.1, np.deg2rad(1.0), 1.0])**2  # predict state covariance
+        self.R = np.diag([1.0, 1.0])**2  # Observation x,y position covariance
 
         #self.dimg = []
         #self.bridge = CvBridge()
@@ -167,9 +284,33 @@ class DetectObjects(object):
             #ts.registerCallback(self.callback)
 
 
+
     def extended_kalman(self, msg):
         print('EKF: ',msg)
 
+        EKF_node = ExtendedKalman()   
+        #EKF_node.start()
+        kf = EKF_node(initialReading,2,sensorNoise,stateTransfer,sensorTransfer, processNoise, processNoiseCovariance)
+
+        #predict & update
+        kf.predict()
+        kf.update(reading)
+
+        #grab result for this iteration and figure out a resistance value
+        myEstimate = kf.getEstimate()
+
+        '''
+        # State Vector [x y yaw v]'
+        self.xEst = np.zeros((4, 1))
+        self.xTrue = np.zeros((4, 1))
+        self.PEst = np.eye(4)
+
+        xDR = np.zeros((4, 1))  # Dead reckoning
+
+        u = calc_input()
+        xTrue, z, xDR, ud = self.observation(xTrue, xDR, u)
+        xEst, PEst = self.ekf_estimation(xEst, PEst, z, ud)
+        '''
 
 
     def data_assosiation(self):
@@ -639,7 +780,7 @@ class DetectObjects(object):
 
             
     def pixel_2_angle(self, x, y, z=1):
-        x_angle = x*self.fov_pixel-(self.width/2)*self.fov_pixel+np.deg2rad(self.Mounting_angle)
+        x_angle = x*self.fov_pixel-(self.width/2)*self.fov_pixel
         y_angle = y*self.fov_pixel-(self.height/2)*self.fov_pixel
         z_angle = z
         return [x_angle, y_angle, x_angle] 
@@ -658,31 +799,34 @@ class DetectObjects(object):
 
         # Get projection matrix
         mat = self.get_M(phi, theta, psi, dx, dy, dz)
-
-        self.warp = cv2.warpPerspective(image, mat, (self.width, self.height))
+        self.warp = image#cv2.warpPerspective(image, mat, (self.width, self.height))
         self.draw = self.warp.copy()
         #print('WARP')
         
 
     """ Get Perspective Projection Matrix """
-    def get_M(self, phi, theta, psi, dx=0, dy=0, dz=0, w=None, h=None, f=None):
-
+    def get_M(self, phi, theta, psi, dx=0, dy=0, dz=None, w=None, h=None, f=None):
+        d1 = 0
+        #CB = np.eye(4)
         if w is None:
             w=self.width
             h=self.height
             f=self.focal
-
-        # Projection 2D -> 3D matrix
-        A1 = np.array([ [1, 0, -w/2],
-                        [0, 1, -h/2],
-                        [0, 0, 1],
-                        [0, 0, 1]])
-
+        if dz is None:
+            dz = self.focal
+            d1 = 1
+        
         # Transform from image coordinate to body
         CB = np.array([ [0, 1, 0, 0],
                         [0, 0, -1, 0],
                         [-1, 0, 0, 0],
                         [0, 0, 0, 1]])
+
+        # Projection 2D -> 3D matrix
+        A1 = np.array([ [1, 0, -w/2],
+                        [0, 1, -h/2],
+                        [0, 0, 1],
+                        [0, 0, d1]])
         
         R = self.rotation_3D(phi, theta, psi)
 
@@ -699,7 +843,7 @@ class DetectObjects(object):
 
         # Composed rotation matrix with (CB, R, CBinv)
         RCB = np.dot(np.dot(CB,R),CB.transpose())
-
+        #print(R)
         # Final transformation matrix
         return np.dot(A2, np.dot(T, np.dot(RCB, A1)))
         #return R
@@ -815,16 +959,22 @@ class DetectObjects(object):
         
         while not rospy.is_shutdown():
             corner = []
+            corners = None
             if self.newimage == True:
                 self.newimage = False
-                self.looking_angle = np.deg2rad(00+self.Mounting_angle*self.number)
+                self.looking_angle = np.deg2rad(0+self.Mounting_angle)*self.number
+                if self.looking_angle > np.pi:
+                    self.looking_angle -= 2*np.pi
+                elif self.looking_angle < -np.pi:
+                    self.looking_angle += 2*np.pi
+                camera_mounting_offset = 3
                 phi, theta, psi = self.euler_angles
                 self.rotate_along_axis(self.image, -phi, -theta, -self.looking_angle)
                 
                 h = self.height
                 w = self.width
                 self.count+=1
-                if self.count%1 == 0:#self.detect_ready:
+                if self.count%5 == 0:#self.detect_ready:
                     self.yolo_image = self.warp.copy()
                     self.index +=1
                     if self.index > 2:
@@ -839,7 +989,7 @@ class DetectObjects(object):
                     #img = cv2.imread('/home/runar/boat_single.jpg')
                     
                     self.yolopose = self.warppose
-                    corners = self.call_server(tile)
+                    #corners = self.call_server(tile)
 
                     if corners is not None:
                         corners.sort(reverse = True, key=lambda x :x[1])
@@ -880,16 +1030,62 @@ class DetectObjects(object):
                 for d in self.detections:
                     cv2.line(self.draw, (d+int(w/2), 0), (d+int(w/2), h), (255,0,0), 10)
                 self.detections = []
+                #self.looking_angle
+                for s in range(-8, 9):
+                    mat2 = self.get_M(0.05, 0.1, s*np.pi/8, 0,0,0,0,0,1)
+                    print(mat2, s*np.pi/8)
+                mat2 = self.get_M(phi, theta, self.looking_angle, 0,0,0,0,0,1)
+                #ime = np.eye(2)
+                #im = np.array([1,1])
+                #print(ime, im)
+                #im2 = cv2.warpPerspective(im, mat2, (2, 2))
+                rx = np.dot(mat2,[1,0,0])[1]
+                tx = np.dot(mat2,[0,0,1])[1]
+                rot = phi*np.cos(self.looking_angle)+theta*np.sin(self.looking_angle)
+                trans = -phi*np.sin(self.looking_angle)+theta*np.cos(self.looking_angle)
+                print(mat2,self.looking_angle)
+                print(rx,phi,rot)
+                print(tx,theta,trans)
 
-                mat2 = self.get_M(-(phi), -(theta), -(psi),0,0,1,0,0,1)
 
-                p1 = np.dot(mat2,[np.deg2rad(-50),np.deg2rad(5),np.deg2rad(-5)])
-                p2 = np.dot(mat2,[np.deg2rad(50),np.deg2rad(5),np.deg2rad(5)])
+                #print(im2)
+                #print(np.dot(mat2,[0,h/2,self.looking_angle]))
+                #print(np.dot(mat2,[w,h/2,self.looking_angle]))
+                #cv2.line(self.draw, (int(p01[0]),int(p01[1])), (int(p02[0]),int(p02[1])), (0,255,0),2)
+                '''
+                print(np.dot(mat2,[0,1,0]))
+                print(np.dot(mat2,[1,1,0]))
+                print(np.dot(mat2,[0,0,1]))
+                print(np.dot(mat2,[0,1,1]))
+                print(np.dot(mat2,[1,0,0]))
+                print(np.dot(mat2,[1,0,1]))
+                '''
+                #p1 = np.dot(mat2,[-1,0,0])
+                #p2 = np.dot(mat2,[1,0,0])
+                p1 = [-1,]
+                #p1 = np.dot(mat2,[tx, ty, self.looking_angle+np.deg2rad(-50+camera_mounting_offset)])
+                #p2 = np.dot(mat2,[np.deg2rad(-60+camera_mounting_offset),ty, x])
+                #p2 = np.dot(mat2,[tx, ty, self.looking_angle+np.deg2rad(50+camera_mounting_offset)])
+                #p4 = np.dot(mat2,[np.deg2rad(60+camera_mounting_offset),ty, x])
+                #p5 = np.dot(mat2,[np.deg2rad(120+camera_mounting_offset),ty, x])
+                #p3 = np.dot(mat2,[-ty,-tx, np.deg2rad(90+camera_mounting_offset)])
+                #p4 = np.dot(mat2,[tx,-ty, np.deg2rad(180+camera_mounting_offset)])
                 #print(p1,p2)
                 p1 = self.angle_2_pixel(p1[0],p1[1],p1[2])
                 p2 = self.angle_2_pixel(p2[0],p2[1],p2[2])
+                #p3 = self.angle_2_pixel(p3[0],p3[1],p3[2])
+                #p4 = self.angle_2_pixel(p4[0],p4[1],p4[2])
+                #p5 = self.angle_2_pixel(p5[0],p5[1],p5[2])
+                #p6 = self.angle_2_pixel(p6[0],p6[1],p6[2])
                 #print(p1,p2)
+                
                 cv2.line(self.draw, (int(p1[0]),int(p1[1])), (int(p2[0]),int(p2[1])), (0,255,0),2)
+                #cv2.line(self.draw, (int(p2[0]),int(p2[1])), (int(p3[0]),int(p3[1])), (0,255,0),2)
+                #cv2.line(self.draw, (int(p3[0]),int(p3[1])), (int(p4[0]),int(p4[1])), (0,255,0),2)
+                #cv2.line(self.draw, (int(p4[0]),int(p4[1])), (int(p1[0]),int(p1[1])), (0,255,0),2)
+                #cv2.line(self.draw, (int(p5[0]),int(p5[1])), (int(p6[0]),int(p6[1])), (0,255,0),2)
+                #cv2.line(self.draw, (int(p6[0]),int(p6[1])), (int(p1[0]),int(p1[1])), (0,255,0),2)
+                
                 #self.data_assosiation()
                 cv2.imshow('Cam3', self.draw)
                 cv2.waitKey(1)
