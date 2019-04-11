@@ -198,6 +198,8 @@ class ExtendedKalman():
 class DetectObjects(object):
     def __init__(self):
         # Params
+        self.templates = {}
+        self.temp_num = 0
         self.corners = None
         self.detect_ready = True
         self.count = 0
@@ -616,7 +618,30 @@ class DetectObjects(object):
                 self.data_assosiation(bb_angles)
 
                     
-
+    def template_tracker(self, image, corners=None):
+        if corners is not None:
+            for c in corners:
+                if self.templates == {}:
+                    self.templates[0] = c
+                else:
+                    for tname in self.templates:
+                        templ = self.templates[tname][1]
+                        w, h = templ.shape[::-1]
+                        res = cv2.matchTemplate(image,templ,cv2.TM_CCOEFF_NORMED)
+                        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
+                        top_left = max_loc
+                        bottom_right = (top_left[0] + w, top_left[1] + h)
+                        cv2.rectangle(self.warp,top_left, bottom_right, 255, 2)
+                        t = self.templates[tname]
+                        if c[0] > t[0]-50 and c[1] > t[1]-50 and c[2] < t[2]+50 and c[3] < t[3]+50:
+                            self.templates[tname] = [c, im]
+                            self.penalty[tname] = 0
+                        else:
+                            self.penalty[tname] +=1
+                            self.temp_num += 1
+                            self.templates[self.temp_num] = [c, image[c[1]:c[3],c[0]:c[2]]]
+                        if self.penalty[tname] > 50:
+                            del self.templates[tname]
 
             
     def pixel_2_angle(self, x, y, z=0):
@@ -823,10 +848,13 @@ class DetectObjects(object):
                     '''
                     #print('Detected boat: ',corner)
                     if corner == []:
+                        self.template_tracker(self.warp)
                         self.show_webcam(self.warp)
                     else:
+                        self.template_tracker(self.yolo_image, corner)
                         self.show_webcam(self.yolo_image, corner)
                 else:
+                    self.template_tracker(self.warp)
                     self.show_webcam(self.warp)
 
                 #else:
