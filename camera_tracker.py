@@ -85,15 +85,15 @@ class ExtendedKalman():
     """
     Nonlinear Kalman Filter Implementation
     """
-    def __init__(self,initialObservation, numSensors, sensorNoise, stateTransitionFunction, sensorTransferFunction, processNoise, processNoiseCovariance):
-        self.numSensors = numSensors
-        self.estimate = initialObservation  #current estimate, initialized with first observation
-        self.previousEstimate = initialObservation  #previous state's estimate, initialized with first observation
-        self.gain = np.identity(numSensors) #tradeoff of system between estimation and observation, initialized arbitrarily at identity
-        self.previousGain = np.identity(numSensors)  #previous gain, again arbitarily initialized
-        self.errorPrediction = np.identity(numSensors) #current estimation of the signal error,... starts as identity arbitrarily
-        self.previousErrorPrediction = np.identity(numSensors)  #previous signal error, again arbitrary initialization
-        self.sensorNoiseProperty = sensorNoise #variance of sensor noise
+    def __init__(self,initialState, numSensors, numStates, sensorNoise, stateTransitionFunction, sensorTransferFunction, processNoise, processNoiseCovariance):
+        self.numStates = numStates
+        self.estimate = initialState  #current estimate, initialized with first observation
+        self.previousEstimate = initialState  #previous state's estimate, initialized with first observation
+        self.gain = np.array([[0,0],[0,0],[0,0],[0,0]]) #tradeoff of system between estimation and observation, initialized arbitrarily at identity
+        self.previousGain = np.array([[0,0],[0,0],[0,0],[0,0]])  #previous gain, again arbitarily initialized
+        self.errorPrediction = np.identity(numStates) #current estimation of the signal error,... starts as identity arbitrarily
+        self.previousErrorPrediction = np.identity(numStates)  #previous signal error, again arbitrary initialization
+        self.R = sensorNoise #variance of sensor noise
         self.f = stateTransitionFunction #state-transition function, from user input
         self.fJac = nd.Jacobian(self.f) #jacobian of f
         self.h = sensorTransferFunction  #sensor transfer function, from user input
@@ -107,35 +107,55 @@ class ExtendedKalman():
         Predicts estimate and error prediction according to model of the situation
         """
         #update current state
-        self.estimate = self.f(self.previousEstimate) + self.processNoise
+        #self.estimate = np.dot(self.f, self.previousEstimate) + self.processNoise
+        self.estimate = np.dot(self.f, self.previousEstimate)
+        self.range = np.sqrt(self.estimate[0]**2+self.estimate[1]**2)
+        print('Range',self.range)
 
         #find current jacobian value
-        jacVal = self.fJac(self.previousEstimate) + self.processNoise
+        #jacVal = self.fJac(self.previousEstimate) + self.processNoise
 
         #update error prediction state
-        self.errorPrediction = np.dot(jacVal , np.dot(self.previousErrorPrediction,np.transpose(jacVal))) + self.Q
+        #self.errorPrediction = np.dot(jacVal , np.dot(self.previousErrorPrediction,np.transpose(jacVal))) + self.Q
+        self.errorPrediction = np.dot(self.f , np.dot(self.previousErrorPrediction,np.transpose(self.f))) + self.Q
 
-    def update(self,currentObservation):
+    def update(self,currentObservation=None):
+        #currentObservation = np.array([[0.1],[1.0]])
+        #currentObservation = np.transpose(y)
         """
         Called second.
         Updates estimate according to combination of observed and prediction.
         Also updates our learning parameters of gain and errorprediction.
         """
-        #update the current estimate based on the gain
-        self.estimate = self.estimate + np.dot(self.gain,(currentObservation - self.h(self.estimate)))
+        if currentObservation is None:
+            g = [[0,0],[0,0],[0,0],[0,0]]
+            currentObservation = [[0],[0]]
+        else:
+            g = self.gain
+        #if all(self.estimate) == 0 or (abs(self.estimate[0]-currentObservation[0] < 200) and abs(self.estimate[1]-currentObservation[1] < 200)):
+            #update the current estimate based on the gain
+        self.estimate = self.estimate + np.dot(g,(currentObservation - np.dot(self.h, self.estimate)))
         #find current jacobian value
-        jacVal = self.hJac(self.estimate)
+        #jacVal = np.dot(self.hJac, self.estimate)
 
         #update the gain based on results from hte previous attempt at estimating
-        invVal = np.dot(jacVal, np.dot(self.errorPrediction, np.transpose(jacVal))) + self.sensorNoiseProperty
-        self.gain = np.dot(self.errorPrediction, np.dot(np.transpose(jacVal) , np.linalg.inv(invVal) ))
+        #invVal = np.dot(jacVal, np.dot(self.errorPrediction, np.transpose(jacVal))) + self.R
+        #self.gain = np.dot(self.errorPrediction, np.dot(np.transpose(jacVal) , np.linalg.inv(invVal) ))
+        invVal = np.dot(self.h, np.dot(self.errorPrediction, np.transpose(self.h))) + self.R
+        self.gain = np.dot(self.errorPrediction, np.dot(np.transpose(self.h) , np.linalg.inv(invVal) ))
+        
         #update error prediction based on our success
-        self.errorPrediction = np.dot((np.identity(self.numSensors) - np.dot(self.gain, jacVal)), self.errorPrediction)
+        #self.errorPrediction = np.dot((np.identity(self.numStates) - np.dot(self.gain, jacVal)), self.errorPrediction)
+        self.errorPrediction = np.dot((np.identity(self.numStates) - np.dot(self.gain, self.h)), self.errorPrediction)
 
         #update variables for next round
         self.previousEstimate = self.estimate
         self.previousGain = self.gain
         self.previousErrorPrediction = self.errorPrediction;
+        print(self.gain,self.errorPrediction)
+        #else:
+        #    print('')
+        
 
     def getEstimate(self):
         """
@@ -198,6 +218,9 @@ class ExtendedKalman():
 class DetectObjects(object):
     def __init__(self):
         # Params
+        self.new_radar = False
+        self.new_camera = False
+
         self.templates = {}
         self.temp_num = 0
         self.corners = None
@@ -242,26 +265,61 @@ class DetectObjects(object):
         self.penalty = np.zeros([100])
 
         # Estimation parameter of EKF
-        self.processNoise = np.diag([0.1, 0.1, np.deg2rad(1.0), 1.0])**2  # predict state covariance
-        self.sensorNoise = np.diag([1.0, 1.0])**2  # Observation x,y position covariance
-        self.processNoiseCovariance = np.eye(2)
-        self.initialReading = []
+        dT = 0.01    #Timestep
+        self.processNoise = np.diag([1.0, 1.0, 1.0, 1.0])**2  # predict state covariance
+        self.sensorNoise = np.diag([10., 10.])**2  # Observation x,y position covariance
+        self.processNoiseCovariance = np.eye(4)
+        self.initialReading = np.array([[0],[0],[0],[0]])
+        self.stateTransfer =   np.array([[1,0,dT,0],
+                                [0,1,0,dT],
+                                [0,0,1,0],
+                                [0,0,0,1]])
+        self.sensorTransfer =  np.array([[1,0,0,0],
+                                [0,1,0,0]])
 
-
-
-    def extended_kalman(self, msg):
-        print('EKF: ',msg)
-
-        EKF_node = ExtendedKalman()   
+    def EKF_init(self):
+        #EKF_node = ExtendedKalman()   
         #EKF_node.start()
-        kf = EKF_node(self.initialReading,2,self.sensorNoise,self.stateTransfer,self.sensorTransfer, self.processNoise, self.processNoiseCovariance)
+        self.kf = ExtendedKalman(self.initialReading,2,4,self.sensorNoise,self.stateTransfer,self.sensorTransfer, self.processNoise, self.processNoiseCovariance)
 
+
+    def extended_kalman(self):
+        #print('EKF: ',msg)
+        y = None
+        if self.new_radar:
+            for d in self.detections:
+                dx = self.posterior_pos.x - self.position.x
+                dy = self.posterior_pos.y - self.position.y
+                phi, theta, psi = self.euler_angles
+
+                self.radar_range = np.sqrt(dx**2+dy**2)
+
+                radar_angle_ned = np.arctan2(dx,dy)
+                self.radar_angle_body = radar_angle_ned - psi + np.deg2rad(-3.14)     # Installation angle offset between radar and vessel frame 
+                if self.radar_angle_body < -np.pi:
+                    self.radar_angle_body += 2*np.pi
+                elif self.radar_angle_body > np.pi:
+                    self.radar_angle_body -= 2*np.pi
+
+                y = np.array([[dx],[dy]])
+                #predict & update
+                self.kf.predict()
+                self.kf.update(y)
+            self.new_radar = False
+        
+        elif self.new_camera:
+            y = np.array([[0],[0]])
+            self.new_camera = False
         #predict & update
-        kf.predict()
-        kf.update(reading)
+        self.kf.predict()
+        if y is None:
+            self.kf.update()
+        else:
+            self.kf.update(y)
 
-        #grab result for this iteration and figure out a resistance value
-        myEstimate = kf.getEstimate()
+        #grab result for this iteration 
+        myEstimate = self.kf.getEstimate()
+        print(myEstimate)
 
         '''
         # State Vector [x y yaw v]'
@@ -277,53 +335,53 @@ class DetectObjects(object):
         '''
 
 
-    def data_assosiation(self, bb_angles):
+    def data_assosiation(self):
         #print('DATA')
         a = []
         c = []
         e = []
-        #try:
-        if self.radar_detections != []:
-            for d in self.radar_detections:
-                for ang in bb_angles:
-                    #print('A')
-                    a.append([abs(int(d[0])-ang), abs(int(d[1])-self.range), d[2], d])
-                    #e[1] = d[1]
-                    #e[2] = self.bb_angle
-                    #e[3] = d
-                    #print('e:  ', e)
-            self.radar_detections = []
-            try:
-                a.sort(key=lambda x:x[0])
-            except:
-                print('a sort failed')
-            for b in a:
-                #print('b')
-                if b[0] < np.deg2rad(10):  # Only look in +/-10 degree area
-                    c.append(b)
-                    #print('B')
-            try:
-                c.sort(key=lambda x:x[1])
-            except:
-                print('c sort failed')
-            for d in c:
-                if d[2] == self.track_id:
-                    e = [d]+e
-                    #print('e', e)
-                else:
-                    e.append(d)
-            try:
-                self.range = e[0][1]
-                self.track_id = e[0][2]
-                print('RANGE: ',self.range, self.track_id)
-                self.extended_kalman(e[0][3])
-            except:
-                print('data assosiation failed')
-            
+        try:
+            if self.radar_detections != []:
+                for d in self.radar_detections:
+                    for ang in self.bb_angles:
+                        #print('A')
+                        a.append([abs(int(d[0])-ang), abs(int(d[1])-self.range), d[2], d])
+                        #e[1] = d[1]
+                        #e[2] = self.bb_angle
+                        #e[3] = d
+                        #print('e:  ', e)
+                self.radar_detections = []
+                try:
+                    a.sort(key=lambda x:x[0])
+                except:
+                    print('a sort failed')
+                for b in a:
+                    #print('b')
+                    if b[0] < np.deg2rad(10):  # Only look in +/-10 degree area
+                        c.append(b)
+                        #print('B')
+                try:
+                    c.sort(key=lambda x:x[1])
+                except:
+                    print('c sort failed')
+                for d in c:
+                    if d[2] == self.track_id:
+                        e = [d]+e
+                        #print('e', e)
+                    else:
+                        e.append(d)
+                try:
+                    self.range = e[0][1]
+                    self.track_id = e[0][2]
+                    print('RANGE: ',self.range, self.track_id)
+                    self.extended_kalman(e[0][3])
+                except:
+                    print('data assosiation failed')
+                
         #else:
          #   print('No radar detections')
-        #except:
-        #    print('Radar assosiation error')
+        except:
+            print('Radar assosiation error')
         #print('NOE')
 
         
@@ -372,6 +430,7 @@ class DetectObjects(object):
             [self.posterior_vel_cov.var_x, self.posterior_vel_cov.var_y, self.posterior_vel_cov.cor_xy]]))
         self.detections.append(self.radar_pixel)
 
+        self.new_radar = True
         #cv2.line(self.warp, (self.radar_pixel, 0), (self.radar_pixel, self.height), (0,255,0), 10)
         #print('RADAR_ANGLE',radar_angle_ned, psi, self.radar_angle_body, self.radar_angle_image, self.radar_pixel)
         
@@ -417,7 +476,8 @@ class DetectObjects(object):
                     if obj == '"boat"' and prob > 0.25:
                         if corners is None:
                             corners = []
-                        corners.append([obj,prob,np.array([xmin,ymin,xmax,ymax])]) 
+                        corners.append([obj,prob,np.array([xmin,ymin,xmax,ymax])])
+
                 self.corners = corners
             self.detect_ready = True
                 #print(i,corners)
@@ -614,35 +674,50 @@ class DetectObjects(object):
                         cv2.rectangle(self.draw, (int(b[0]), int(b[1])), (int(b[2]), int(b[3])), 
                             [0,0,255], 2)
                         self.bb_angle = (self.fov_pixel*(int(b[0])+(int(b[2])-int(b[0]))/2-self.width/2)+self.number*np.deg2rad(self.Mounting_angle))
-                        bb_angles.append[self.bb_angle]
-                self.data_assosiation(bb_angles)
+                        self.bb_angles.append[self.bb_angle]
+                self.new_camera = True
+                
 
                     
     def template_tracker(self, image, corners=None):
+        #print(corners)
+        im = image[self.height/3:2*self.height/3,:]
+        
         if corners is not None:
             for c in corners:
                 if self.templates == {}:
-                    self.templates[0] = c
+                    self.templates[0] = [c,image[0:2,0:2]]
                 else:
                     for tname in self.templates:
                         templ = self.templates[tname][1]
-                        w, h = templ.shape[::-1]
-                        res = cv2.matchTemplate(image,templ,cv2.TM_CCOEFF_NORMED)
+                        #print(templ.shape,c)
+                        h, w = templ.shape[:2]
+                        res = cv2.matchTemplate(im,templ,cv2.TM_CCOEFF_NORMED)
                         min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
                         top_left = max_loc
-                        bottom_right = (top_left[0] + w, top_left[1] + h)
-                        cv2.rectangle(self.warp,top_left, bottom_right, 255, 2)
-                        t = self.templates[tname]
+                        bottom_right = (top_left[0] + h, top_left[1] + w)
+                        
+                        print(top_left,bottom_right)
+                        t = self.templates[tname][0]
                         if c[0] > t[0]-50 and c[1] > t[1]-50 and c[2] < t[2]+50 and c[3] < t[3]+50:
-                            self.templates[tname] = [c, im]
+                            self.templates[tname] = [c, templ]
                             self.penalty[tname] = 0
+                            cv2.rectangle(im,top_left, bottom_right, [0,255,255], 2)
                         else:
-                            self.penalty[tname] +=1
-                            self.temp_num += 1
-                            self.templates[self.temp_num] = [c, image[c[1]:c[3],c[0]:c[2]]]
-                        if self.penalty[tname] > 50:
-                            del self.templates[tname]
+                            if self.penalty[tname] > 500:
+                                del self.templates[tname]
+                                break
+                            else:
+                                self.penalty[tname] +=1
+                                self.temp_num += 1
+                                self.templates[self.temp_num] = [c, image[int(c[1]):int(c[3]),int(c[0]):int(c[2])]]
+                                cv2.rectangle(im,top_left, bottom_right, [255,0,255], 2)
+                                break
+                        print(len(self.templates))
+                    cv2.imshow('im',im)
+                    cv2.waitKey(1)
 
+                        
             
     def pixel_2_angle(self, x, y, z=0):
         x_angle = x*self.fov_pixel-(self.width/2)*self.fov_pixel+np.deg2rad(self.Mounting_angle)
@@ -736,6 +811,8 @@ class DetectObjects(object):
         
 
     def start(self):
+        self.EKF_init()
+        self.rate = rospy.Rate(100)
         # Subscribers
         rospy.Subscriber('/seapath/pose',geomsg.PoseStamped, self.pose_callback)
         rospy.Subscriber('/radar/estimates', automsg.RadarEstimate, self.radar_callback)
@@ -769,6 +846,8 @@ class DetectObjects(object):
         
         while not rospy.is_shutdown():
             corner = []
+            self.extended_kalman()
+            #self.data_assosiation()
             #corners = None
             if self.newimage == True:
                 self.newimage = False
@@ -849,13 +928,13 @@ class DetectObjects(object):
                     #print('Detected boat: ',corner)
                     if corner == []:
                         self.template_tracker(self.warp)
-                        self.show_webcam(self.warp)
+                        #self.show_webcam(self.warp)
                     else:
                         self.template_tracker(self.yolo_image, corner)
-                        self.show_webcam(self.yolo_image, corner)
+                        #self.show_webcam(self.yolo_image, corner)
                 else:
                     self.template_tracker(self.warp)
-                    self.show_webcam(self.warp)
+                    #self.show_webcam(self.warp)
 
                 #else:
                 #    self.show_webcam(self.warp)
@@ -898,6 +977,7 @@ class DetectObjects(object):
                  [ 0.239118  0.892399  0.382683]
                  [ 0.965926 -0.258819  0.      ]]   # 90 deg
                 '''
+            self.rate.sleep()
 
 
 
