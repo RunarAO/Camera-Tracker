@@ -199,7 +199,8 @@ class DetectObjects(object):
         self.dark_id = None
         self.prev_dark_id = None
         self.dark_stamp = 0
-        self.prev_dark_stamp = None
+        self.prev_dark_stamp = 0
+        self.darkpose = [0,0,0]
         self.millisecond = None
         self.firstimage = None
         self.second = None
@@ -217,7 +218,8 @@ class DetectObjects(object):
         self.focal = 1350
         self.number = 4
         self.Mounting_angle = 72       # 5 cameras, 360/5=72
-        self.camera_offset = 3         # psi degrees between camera and vessel
+        self.camera_offset = -3        # psi degrees between camera and vessel
+        self.radar_offset = 3         # psi degrees between radar and vessel
         self.fov_radians = np.deg2rad(100)      #FOV is about 100 deg
         self.fov_pixel = self.fov_radians/1616#self.width
 
@@ -294,7 +296,7 @@ class DetectObjects(object):
             if est_xdot > 100 or est_ydot > 100:
                 self.target[i] = 2000
             angle_ned = np.arctan2(est_y,est_x)
-            angle_body = angle_ned - self.psi - self.looking_angle + np.deg2rad(3)     # Installation angle offset between radar and vessel  
+            angle_body = angle_ned - self.psi - self.looking_angle + np.deg2rad(self.radar_offset)     # Installation angle offset between radar and vessel  
             
             #print('AAAAA',angle_body,self.bb_angles)
             
@@ -308,38 +310,38 @@ class DetectObjects(object):
             #print(psi, angle_ned, angle_body, est_range)
             
             for j in radar_detections2:
-                if i == j and est_range < 1000:
+                if i == j and est_range < 800:
                     y = radar_detections2[j]
                     plt.plot(float(y[1]), float(y[0]), '+r')
-                    '''
+                    
                     g = self.kf[i].getGain()
                     p = self.kf[i].getP()
                     est = self.kf[i].getEstimate()
-                    print('Radar:   ',i)
+                    print('Radar:   ',i, angle_body)
                     print('est:  ',y,est)
                     print(g)
                     print(p)
-                    '''
+                    
                     break
             else:
-                if est_range < 1000:
-                    a = []
+                if est_range < 500:
+                    #a = []
                     for k in self.bb_angles:
-                        print('ANGLE: ',k, angle_body)
+                        print('ANGLE: ',k, angle_body, self.psi)
                         #if abs(angle_body - k) < np.deg2rad(10):
-                        a.append([abs(angle_body - k), k])
+                        #a.append([abs(angle_body - k), k])
                     #print('bbb',b)
-                    if a != []:
+                    #if a != []:
                         #b = min(abs(a[0]))
-                        b = min(a, key=lambda x: x[0])
-                        dx = float(est_range*np.cos(b[1])+self.position.x)
-                        dy = float(est_range*np.sin(b[1])+self.position.y)
+                        #b = min(a, key=lambda x: x[0])
+                        dx = float(est_range*np.cos(k))+self.position.x
+                        dy = float(est_range*np.sin(k))+self.position.y
                         #print(dx,dy)
-                        if b[0] < np.deg2rad(10):
+                        if abs(k-angle_body) < np.deg2rad(5):
                             y = np.array([[dx], [dy]])
-                        camera_angle_image = b[1] - self.looking_angle + np.deg2rad(self.camera_offset)
-                        camera_pixel = int(camera_angle_image/self.fov_pixel)
-                        self.c_detections.append(camera_pixel)
+                        #camera_angle_image = k - np.deg2rad(self.camera_offset) #- self.looking_angle
+                        #camera_pixel = int(camera_angle_image/self.fov_pixel)
+                        #self.c_detections.append(camera_pixel)
                         print('Camera  ',i)
                         g = self.kf[i].getGain()
                         p = self.kf[i].getP()
@@ -348,7 +350,7 @@ class DetectObjects(object):
                         print('est:  ',y,est)
                         print(g)
                         print(p)
-                if est_range < 1000:
+                if est_range < 800:
                     radar_angle_image = angle_body #-np.pi/4
                     #print(radar_angle_image, angle_body, self.looking_angle)
                     radar_pixel = int(radar_angle_image/self.fov_pixel)
@@ -449,8 +451,8 @@ class DetectObjects(object):
         #print(self.centroid_ned, self.ned)
         x = posterior_pos.x
         y = posterior_pos.y
-        dx = posterior_pos.x - self.position.x
-        dy = posterior_pos.y - self.position.y
+        #dx = posterior_pos.x - self.position.x
+        #dy = posterior_pos.y - self.position.y
         #phi, theta, psi = self.euler_angles
 
         #radar_angle_ned = np.arctan2(dx,dy)
@@ -517,13 +519,22 @@ class DetectObjects(object):
                     if obj == '"boat"' and prob > 0.25:
                         if corners is None:
                             corners = []
-                        corners.append([obj,prob,np.array([xmin,ymin,xmax,ymax])])
-                        #bb_angle = (self.fov_pixel*(xmin+(xmax-xmin)/2-self.width/2)+self.number*np.deg2rad(self.Mounting_angle))
-                        #self.bb_angles.append(self.fov_pixel*(xmin+(xmax-xmin)/2-self.width/2)+self.looking_angle)
-                        #print(self.bb_angles)
-                        #cv2.rectangle(self.draw, (int(xmin), int(ymin)), (int(xmax), int(ymax   )), [0,0,255], 2)
+                        if ymin < self.height/2+10 and ymax > self.height/2-10:     #Only around the horizon
+                            pose = self.warppose[2] - self.psi
+                            dx = self.angle_2_pixel(pose)
+                            print('DX:   ',dx)
+                            corners.append([obj,prob,np.array([xmin+dx,ymin,xmax+dx,ymax])])
+
+                            #bb_angle = (self.fov_pixel*(xmin+(xmax-xmin)/2+ dx-self.width/2)+self.number*np.deg2rad(self.Mounting_angle))
+                            bb_angle = self.fov_pixel*(xmin+(xmax-xmin)/2 + dx - self.width/2)
+                            self.bb_angles.append(bb_angle + self.looking_angle + self.psi + np.deg2rad(self.camera_offset))#self.fov_pixel*(xmin+(xmax-xmin)/2 + dx - self.width/2)+ self.looking_angle + self.psi + np.deg2rad(self.camera_offset))
+                            #print(self.bb_angles)
+                            cv2.rectangle(self.draw, (int(xmin+dx), int(ymin)), (int(xmax+dx), int(ymax   )), [0,0,255], 2)
+                            camera_pixel = int(bb_angle/self.fov_pixel)
+                            self.c_detections.append(camera_pixel)
 
                 self.corners = corners
+                self.darkpose = self.euler_angles
             self.detect_ready = True
                 #print(i,corners)
 
@@ -576,7 +587,7 @@ class DetectObjects(object):
         else:
             try:
                 self.penalty += 1
-                if self.penalty < 50:
+                if self.penalty < 10:
                     boxToDraw = tracker.track(image[:,:,::-1], 'Cam')
                 else:
                     boxToDraw = [0,0,0,0]
@@ -591,7 +602,7 @@ class DetectObjects(object):
                 #print(a,b)
                 if ((abs(b[0]-b[2]) > 4) and (abs(b[1]-b[3]) > 4)):
                     cv2.rectangle(self.draw, (int(b[0]), int(b[1])), (int(b[2]), int(b[3])), [0,0,255], 2)
-                    self.bb_angles.append(self.fov_pixel*(int(b[0])+(int(b[2])-int(b[0]))/2-self.width/2)+self.looking_angle)
+                    self.bb_angles.append(self.fov_pixel*(int(b[0])+(int(b[2])-int(b[0]))/2-self.width/2)+self.looking_angle + np.deg2rad(self.camera_offset))
                     #self.bb_angles.append(self.fov_pixel*(xmin+(xmax-xmin)/2-self.width/2)+self.looking_angle+psi)
                     #print(bb_angle)
                     #self.bb_angles.append(bb_angle)
@@ -637,7 +648,7 @@ class DetectObjects(object):
                                 new = True
                                 self.penalty[bkey] += 1
                                 #print('PENALTY',bkey,self.penalty)
-                                if self.penalty[bkey] > 50:        # If no detections for X iterations. Remove track
+                                if self.penalty[bkey] > 10:        # If no detections for X iterations. Remove track
                                     boxToDraw[bkey] = [0,0,0,0]
                                     box[bkey] = [0,0,0,0]
                                     self.penalty[bkey] = 0
@@ -716,7 +727,7 @@ class DetectObjects(object):
                 box = boxToDraw
                 for bkey in boxToDraw:
                     self.penalty[bkey] += 1
-                    if self.penalty[bkey] > 50:
+                    if self.penalty[bkey] > 10:
                         boxToDraw[bkey] = [0,0,0,0]
                         del box[bkey]
                         self.penalty[bkey] = 0
@@ -788,7 +799,7 @@ class DetectObjects(object):
         x_angle = x*self.fov_pixel-(self.width/2)*self.fov_pixel+np.deg2rad(self.Mounting_angle)
         y_angle = y*self.fov_pixel-(self.height/2)*self.fov_pixel
         z_angle = z
-        return [x_angle, y_angle, x_angle] 
+        return [x_angle, y_angle, z_angle] 
 
     def angle_2_pixel(self, r):
         return (r/self.fov_pixel)#+(self.width/2)#-np.deg2rad(self.Mounting_angle*self.fov_pixel)
@@ -797,16 +808,17 @@ class DetectObjects(object):
         #return [x, y, z]
         
     def rotate_along_axis(self, image, phi=0, theta=0, psi=0, dx=0, dy=0, dz=0):
-        self.warppose = self.euler_angles
         # Get ideal focal length on z axis
         dz = self.focal*1.
         #axis = np.float32([[3,0,0], [0,3,0], [0,0,3]]).reshape(-1,3)
 
         # Get projection matrix
         self.mat = self.get_M(phi, theta, psi, dx, dy, dz)
-
+        #if len(np.shape(image)) > 2: 
         self.warp = cv2.warpPerspective(image, self.mat, (self.width, self.height))
         self.draw = self.warp.copy()
+        #else:
+        #    return cv2.warpPerspective(image,self.mat)
         #print('WARP')
         
 
@@ -914,38 +926,45 @@ class DetectObjects(object):
                             self.index = 0
                     
                     i = self.index
-                    self.yolo_image = self.warp.copy()
+                    #self.yolo_image = self.warp.copy()
+
+                    self.prev_dark_stamp = float(str(rospy.Time.now()))/1e9
+                    self.warppose = self.euler_angles
 
                     tile = self.warp[h//3:(h//3)*2,(w//3)*i:(w//3)*i+(w//3)]
 
                     self.call_server(tile, i)
-                
+                '''
                 if self.corners is not None:
                     self.corners.sort(reverse = True, key=lambda x :x[1])
+                    pose = np.subtract(self.warppose, self.darkpose)
                     for c in self.corners:
                         if corner == []:
                             #print(c)
                             if c[2][3] < self.height/2+50:
                                 corner = [np.array(c[2])]
+                                print(corner, corner[0][1])
+                                dx = self.angle_2_pixel(pose[2])
+                                corner[0] = [corner[0][0]+dx,corner[0][1],corner[0][2]+dx,corner[0][3]]
                         #else:
                         #    if c[2][3] < self.height/2+50:
                         #        corner.append(np.array(c[2]))
                     
                     if corner == []:
-                        #self.template_tracker(self.warp)
-                        self.re3_track(self.warp)
+                        self.template_tracker(self.warp)
+                        #self.re3_track(self.warp)
                         #self.re3_multi_track(self.warp)
                     else:
                         #c = []
                         #c.append(corner[0])
-                        #self.template_tracker(self.yolo_image, c)
-                        self.re3_track(self.yolo_image, corner[0])
+                        self.template_tracker(self.warp, c)
+                        #self.re3_track(self.warp, corner[0])
                         #self.re3_multi_track(self.yolo_image, corner)
                 else:
-                    #self.template_tracker(self.warp)
-                    self.re3_track(self.warp)
+                    self.template_tracker(self.warp)
+                    #self.re3_track(self.warp)
                     #self.re3_multi_track(self.warp)
-                
+                '''
                     
                 for d in self.detections:
                     cv2.line(self.draw, (d+int(w/2), 0), (d+int(w/2), h), (255,0,0), 10)
