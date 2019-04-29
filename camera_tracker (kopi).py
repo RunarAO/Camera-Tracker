@@ -89,16 +89,16 @@ class ExtendedKalman():
         self.numStates = numStates
         self.estimate = initialState  #current estimate, initialized with first observation
         self.previousEstimate = initialState  #previous state's estimate, initialized with first observation
-        self.gain = np.array([[1,0],[0,1],[1,0],[0,1]]) #tradeoff of system between estimation and observation, initialized arbitrarily at identity
-        self.previousGain = np.array([[1,0],[0,1],[1,0],[0,1]])  #previous gain, again arbitarily initialized
-        self.errorPrediction = 999999999*np.identity(numStates) #current estimation of the signal error,... starts as identity arbitrarily
-        self.previousErrorPrediction = 999999999*np.identity(numStates)  #previous signal error, again arbitrary initialization
+        self.gain = np.array([[0,0],[0,0],[0,0],[0,0]]) #tradeoff of system between estimation and observation, initialized arbitrarily at identity
+        self.previousGain = np.array([[0,0],[0,0],[0,0],[0,0]])  #previous gain, again arbitarily initialized
+        self.errorPrediction = np.identity(numStates) #current estimation of the signal error,... starts as identity arbitrarily
+        self.previousErrorPrediction = np.identity(numStates)  #previous signal error, again arbitrary initialization
         self.R = sensorNoise #variance of sensor noise
         self.f = stateTransitionFunction #state-transition function, from user input
         self.fJac = nd.Jacobian(self.f) #jacobian of f
         self.h = sensorTransferFunction  #sensor transfer function, from user input
         self.hJac = nd.Jacobian(self.h) #jacobian of h
-        self.processNoise = processNoise;  #process noise
+        #self.processNoise = processNoise;  #process noise
         self.Q = processNoiseCovariance #process noise covariance
 
     def predict(self):
@@ -107,36 +107,33 @@ class ExtendedKalman():
         Predicts estimate and error prediction according to model of the situation
         """
         #update current state
-        #self.estimate = self.f(self.previousEstimate)
-        self.estimate = np.dot(self.f, self.previousEstimate)# + self.processNoise
-        
-        #self.range = np.sqrt(self.estimate[0]**2+self.estimate[1]**2)
+        #self.estimate = np.dot(self.f, self.previousEstimate) + self.processNoise
+        self.estimate = np.dot(self.f, self.previousEstimate)
+        self.range = np.sqrt(self.estimate[0]**2+self.estimate[1]**2)
+        #print('Range',self.range)
 
         #find current jacobian value
-        #jacVal = self.fJac(self.previousEstimate)# + self.processNoise
+        #jacVal = self.fJac(self.previousEstimate) + self.processNoise
 
         #update error prediction state
         #self.errorPrediction = np.dot(jacVal , np.dot(self.previousErrorPrediction,np.transpose(jacVal))) + self.Q
         self.errorPrediction = np.dot(self.f , np.dot(self.previousErrorPrediction,np.transpose(self.f))) + self.Q
 
     def update(self,currentObservation=None):
-        
+        #currentObservation = np.array([[0.1],[1.0]])
+        #currentObservation = np.transpose(y)
         """
         Called second.
         Updates estimate according to combination of observed and prediction.
         Also updates our learning parameters of gain and errorprediction.
         """
-        
-        #update the current estimate based on the gain
-        if currentObservation is None:
-            self.estimate = self.estimate
-        else:
-            #self.estimate = self.estimate + np.dot(self.gain,(currentObservation - self.h(self.estimate)))
-            self.estimate = self.estimate + np.dot(self.gain,(currentObservation - np.dot(self.h,self.estimate)))
-        
+
+        #if all(self.estimate) == 0 or (abs(self.estimate[0]-currentObservation[0] < 200) and abs(self.estimate[1]-currentObservation[1] < 200)):
+            #update the current estimate based on the gain
+        self.estimate = self.estimate + np.dot(self.gain,(currentObservation - np.dot(self.h, self.estimate)))
         #find current jacobian value
-        #jacVal = self.hJac(self.estimate)#self.estimate[0])
-        
+        #jacVal = np.dot(self.hJac, self.estimate)
+
         #update the gain based on results from hte previous attempt at estimating
         #invVal = np.dot(jacVal, np.dot(self.errorPrediction, np.transpose(jacVal))) + self.R
         #self.gain = np.dot(self.errorPrediction, np.dot(np.transpose(jacVal) , np.linalg.inv(invVal) ))
@@ -161,15 +158,58 @@ class ExtendedKalman():
         """
         return self.estimate
 
-    def getGain(self):
-        return self.gain
 
-    def getP(self):
-        return self.errorPrediction
+    '''
+    #variables governing the simulation
+    numSamples = 100
+
+    #our sensor simulators ... voltmeter and ammeter
+    voltmeter = sensors.Voltmeter(0,3)
+    ammeter = sensors.Ammeter(0,2)
+    #and their associated state transfer functions, sensor transfer functions, and noise values
+    stateTransfer = lambda x: np.array([[math.pow(x[0][0],1.01)],[math.pow(x[1][0],.99)+5]]) 
+    sensorTransfer = lambda x: x 
+    sensorNoise = np.array([[math.pow(3,2),0],[0,math.pow(2,2)]])
+    processNoise = np.array([[0],[0]])
+    processNoiseCovariance = np.array([[.1,0],[0,.1]])
+
+    #result log holders
+    x_vals = []
+    volt_vals = []
+    current_vals = []
+    r_vals = []
+    ekfv_vals = []
+    ekfc_vals = []
+    ekfr_vals = []
+
+    #finally grab initial readings
+    voltVal = voltmeter.getData()
+    currentVal = ammeter.getData()
+    #put them in a column vector
+    initialReading = np.array([[voltVal],[currentVal]])  #values are column vectors
+    #and initialize our filter with our initial reading, our 2 sensors, and all of the associated data
+    kf = ExtendedKalman(initialReading,2,sensorNoise,stateTransfer,sensorTransfer, processNoise, processNoiseCovariance)
+
+    #now run the simulation
+    for i in range(numSamples)[1:]:
+        #grab data
+        voltVal = voltmeter.getData() 
+        currentVal = ammeter.getData()  
+        reading = np.array([[voltVal],[currentVal]])  #values are column vectors
+
+        #predict & update
+        kf.predict()
+        kf.update(reading)
+
+        #grab result for this iteration and figure out a resistance value
+        myEstimate = kf.getEstimate()
+        voltage_guess = myEstimate[0][0]
+        current_guess = myEstimate[1][0]
+        current_resistance = voltage_guess / current_guess
 
 
 
-
+    '''
 class DetectObjects(object):
     def __init__(self):
         # Params
@@ -208,16 +248,14 @@ class DetectObjects(object):
         self.newimagetimestamp = 0
         self.radar_pixel = 0
         self.detections = []
-        self.c_detections = []
         self.radar_detections = {}
         self.bb_angles = []
         self.range = 100
         self.track_id = None
         
         self.focal = 1350
-        self.number = 4
+        self.number = 0
         self.Mounting_angle = 72       # 5 cameras, 360/5=72
-        self.camera_offset = 3         # psi degrees between camera and vessel
         self.fov_radians = np.deg2rad(100)      #FOV is about 100 deg
         self.fov_pixel = self.fov_radians/1616#self.width
 
@@ -225,149 +263,141 @@ class DetectObjects(object):
         self.penalty = np.zeros([100])
 
         # Estimation parameter of EKF
-        dT = 0.02    #Timestep
+        dT = 0.01    #Timestep
         sigma_cv = 0.5    #Process noise strength
-        sigma_l = 0.05   #Sensor noise strength
+        sigma_l = 0.5   #Sensor noise strength
         self.processNoise = np.diag([1.0, 1.0, 1.0, 1.0])**2  # predict state covariance
-        self.sensorNoise = sigma_l**2 * np.identity(2) #diag([10., 10.])**2  # Observation x,y position covariance
+        self.sensorNoise = sigma_l**2 * np.eye(2) #diag([10., 10.])**2  # Observation x,y position covariance
         self.processNoiseCovariance = sigma_cv**2 * np.array([[(dT**4)/4,0, (dT**3)/2,0],
                                                              [0, (dT**4)/4, 0,(dT**3)/2],
                                                              [(dT**3)/2, 0, (dT**2),  0],
                                                              [0, (dT**3)/2, 0,  (dT**2)]])
-        #self.initialReading = np.array([[0],[0],[0],[0]])
+        self.initialReading = np.array([[0],[0],[0],[0]])
         self.stateTransfer =   np.array([[1,0,dT,0],
-                                         [0,1,0,dT],
-                                         [0,0,1,0],
-                                         [0,0,0,1]])
+                                [0,1,0,dT],
+                                [0,0,1,0],
+                                [0,0,0,1]])
         self.sensorTransfer =  np.array([[1,0,0,0],
-                                         [0,1,0,0]])
+                                [0,1,0,0]])
         self.myEstimate = {}
 
-    
-    def f(self,x):
-        dT = 0.02
-        #print(str(x))
-        x0 = float(x[0][0])+dT
-        x1 = float(x[1][0])+dT
-        x2 = float(x[2][0])
-        x3 = float(x[3][0])
-        return np.array([[x0],[x1],[x2],[x3]])
-
-
-    def h(self,x):
-        return np.array([x[0],x[1]])
-
-    def EKF_init(self, i, x):
+    def EKF_init(self, i=None):
         #EKF_node = ExtendedKalman()   
         #EKF_node.start()
-        #if i is not None:
-        initialReading = [x[0],x[1],[0],[0]]
-        self.kf[i] = ExtendedKalman(initialReading,2,4,self.sensorNoise, self.stateTransfer, self.sensorTransfer, self.processNoise, self.processNoiseCovariance)
+        if i is not None:
+            self.kf[i] = ExtendedKalman(self.initialReading,2,4,self.sensorNoise,self.stateTransfer,self.sensorTransfer, self.processNoise, self.processNoiseCovariance)
 
 
     def extended_kalman(self):
         #print('EKF: ',msg)
-
-        #phi, theta, psi = self.euler_angles
+        phi, theta, psi = self.euler_angles
         y = None
         radar_detections2 = self.radar_detections.copy()
         for i in radar_detections2:
-            est_x = radar_detections2[i][0]-self.position.x
-            est_y = radar_detections2[i][1]-self.position.y
-            est_range = np.sqrt(est_x**2+est_y**2)
-            if i not in self.kf and est_range < 1000:
-                self.EKF_init(i, radar_detections2[i])
+            if i not in self.kf:
+                self.EKF_init(i)
                 self.kf[i].predict()
                 self.myEstimate[i] = self.kf[i].getEstimate()
         for i in self.target:
-            if self.target[i] > 100:
+            if self.target[i] > 1000:
                 del self.kf[i]
                 self.target[i] = -1
 
         for i in self.kf:
             self.kf[i].predict()
-
-            est_x = self.myEstimate[i][0]-self.position.x
-            est_y = self.myEstimate[i][1]-self.position.y
-            est_xdot = self.myEstimate[i][2]
-            est_ydot = self.myEstimate[i][3]
-            if est_xdot > 100 or est_ydot > 100:
-                self.target[i] = 2000
-            angle_ned = np.arctan2(est_y,est_x)
-            angle_body = angle_ned - self.psi - self.looking_angle + np.deg2rad(3)     # Installation angle offset between radar and vessel  
-            
-            #print('AAAAA',angle_body,self.bb_angles)
-            
-            if angle_body < -np.pi:
-                angle_body += 2*np.pi
-            elif angle_body > np.pi:
-                angle_body -= 2*np.pi  
-            
-            #print('xy',est_x,est_y)
-            est_range = np.sqrt(est_x**2+est_y**2)
-            #print(psi, angle_ned, angle_body, est_range)
             
             for j in radar_detections2:
-                if i == j and est_range < 1000:
+                if i == j:
                     y = radar_detections2[j]
-                    plt.plot(float(y[1]), float(y[0]), '+r')
-                    '''
-                    g = self.kf[i].getGain()
-                    p = self.kf[i].getP()
-                    est = self.kf[i].getEstimate()
-                    print('Radar:   ',i)
-                    print('est:  ',y,est)
-                    print(g)
-                    print(p)
-                    '''
                     break
             else:
+                est_x = self.myEstimate[i][0]
+                est_y = self.myEstimate[i][1]
+                #print('xy',est_x,est_y)
+                est_range = np.sqrt(est_x**2+est_y**2)
+                
                 if est_range < 1000:
+                    
+                    angle_ned = np.arctan2(est_x,est_y)
+                    angle_body = angle_ned - psi + np.deg2rad(-3.14)     # Installation angle offset between radar and vessel  
+                    #print('AAAAA',angle_body,self.bb_angles)
+                    if angle_body < -np.pi:
+                        angle_body += 2*np.pi
+                    elif angle_body > np.pi:
+                        angle_body -= 2*np.pi  
+                    
                     a = []
                     for k in self.bb_angles:
-                        print('ANGLE: ',k, angle_body)
-                        #if abs(angle_body - k) < np.deg2rad(10):
                         a.append([abs(angle_body - k), k])
                     #print('bbb',b)
                     if a != []:
                         #b = min(abs(a[0]))
                         b = min(a, key=lambda x: x[0])
-                        dx = float(est_range*np.cos(b[1])+self.position.x)
-                        dy = float(est_range*np.sin(b[1])+self.position.y)
-                        #print(dx,dy)
-                        if b[0] < np.deg2rad(10):
-                            y = np.array([[dx], [dy]])
-                        camera_angle_image = b[1] - self.looking_angle + np.deg2rad(self.camera_offset)
-                        camera_pixel = int(camera_angle_image/self.fov_pixel)
-                        self.c_detections.append(camera_pixel)
-                        print('Camera  ',i)
-                        g = self.kf[i].getGain()
-                        p = self.kf[i].getP()
-                        est = self.kf[i].getEstimate()
-                        plt.plot(float(dy), float(dx), 'ob')
-                        print('est:  ',y,est)
-                        print(g)
-                        print(p)
-                if est_range < 1000:
-                    radar_angle_image = angle_body #-np.pi/4
-                    #print(radar_angle_image, angle_body, self.looking_angle)
-                    radar_pixel = int(radar_angle_image/self.fov_pixel)
-                    self.detections.append(radar_pixel)
-                
-            #if y is not None:
-            self.kf[i].update(y)
+                        dx = float(est_range*np.cos(b[1]))
+                        dy = float(est_range*np.sin(b[1]))
+                        y = np.array([[dx], [dy]])
+                        
+            #print('breaked???',y)
+            if y is not None:
+                print('Y    ',y)
+                self.kf[i].update(y)
             #grab result for this iteration 
             self.myEstimate[i] = self.kf[i].getEstimate()
             #print(i,len(self.kf), self.myEstimate[i])
             self.target[i] += 1
+            '''
+            for d in self.detections:
+                dx = self.posterior_pos.x - self.position.x
+                dy = self.posterior_pos.y - self.position.y
+                phi, theta, psi = self.euler_angles
 
-            plt.plot(float(self.myEstimate[i][1]), float(self.myEstimate[i][0]), '+k')
+                self.radar_range = np.sqrt(dx**2+dy**2)
 
+                radar_angle_ned = np.arctan2(dx,dy)
+                self.radar_angle_body = radar_angle_ned - psi + np.deg2rad(-3.14)     # Installation angle offset between radar and vessel frame 
+                if self.radar_angle_body < -np.pi:
+                    self.radar_angle_body += 2*np.pi
+                elif self.radar_angle_body > np.pi:
+                    self.radar_angle_body -= 2*np.pi
+
+                y = np.array([[dx],[dy]])
+                #predict & update
+                self.kf[i].predict()
+                self.kf[i].update(y)
+            '''    
+                
         self.radar_detections = {}
-        self.bb_angles = []  
+        self.bb_angles = []
+        '''
+        elif self.new_camera:
+            y = np.array([[0],[0]])
+            self.new_camera = False
+        #predict & update
+        self.kf.predict()
+        if y is None:
+            self.kf.update()
+        else:
+            self.kf.update(y)
+
+        #grab result for this iteration 
+        myEstimate = self.kf.getEstimate()
+        print(myEstimate)
+
+        for i in self.new_radar:
+            
 
         
+        # State Vector [x y yaw v]'
+        self.xEst = np.zeros((4, 1))
+        self.xTrue = np.zeros((4, 1))
+        self.PEst = np.eye(4)
 
+        xDR = np.zeros((4, 1))  # Dead reckoning
+
+        u = calc_input()
+        xTrue, z, xDR, ud = self.observation(xTrue, xDR, u)
+        xEst, PEst = self.ekf_estimation(xEst, PEst, z, ud)
+        '''
 
 
     def data_assosiation(self):
@@ -425,12 +455,10 @@ class DetectObjects(object):
         self.pose_stamp = float(str(msg.header.stamp))/1e9
         #self.pose_time = datetime.fromtimestamp(self.pose_stamp)
         self.position = msg.pose.position
-
         quat = msg.pose.orientation
         #self.ned = np.array([self.position.x, self.position.y, self.position.z])
         q_b_w = np.array([quat.x, quat.y, quat.z, quat.w])
         self.euler_angles = conv.quaternion_to_euler_angles(q_b_w)
-        self.psi = self.euler_angles[2]
         #print('ANGLES', self.euler_angles)
         #print(self.mtx, self.dist, self.rvec, self.tvec)
 
@@ -447,28 +475,26 @@ class DetectObjects(object):
         #self.posterior_ned = np.array([posterior_pos.x, posterior_pos.y])
         #print(self.radar_stamp)
         #print(self.centroid_ned, self.ned)
-        x = posterior_pos.x
-        y = posterior_pos.y
         dx = posterior_pos.x - self.position.x
         dy = posterior_pos.y - self.position.y
-        #phi, theta, psi = self.euler_angles
+        phi, theta, psi = self.euler_angles
 
-        #radar_angle_ned = np.arctan2(dx,dy)
-        #radar_angle_body = radar_angle_ned - psi + np.deg2rad(-3.14)     # Installation angle offset between camera and radar  
+        radar_angle_ned = np.arctan2(dx,dy)
+        radar_angle_body = radar_angle_ned - psi + np.deg2rad(-3.14)     # Installation angle offset between camera and radar  
 
-        #if radar_angle_body < -np.pi:
-        #    radar_angle_body += 2*np.pi
-        #elif radar_angle_body > np.pi:
-        #    radar_angle_body -= 2*np.pi
+        if radar_angle_body < -np.pi:
+            radar_angle_body += 2*np.pi
+        elif radar_angle_body > np.pi:
+            radar_angle_body -= 2*np.pi
 
-        #radar_angle_image = radar_angle_body - self.number*np.deg2rad(self.Mounting_angle)
-        #radar_pixel = int(radar_angle_image/self.fov_pixel)
+        radar_angle_image = radar_angle_body - self.number*np.deg2rad(self.Mounting_angle)
+        radar_pixel = int(radar_angle_image/self.fov_pixel)
         #radar_range = np.sqrt(dx**2+dy**2)
-        self.radar_detections[radar_track_id] = np.array([[x], [y]]) 
+        self.radar_detections[radar_track_id] = np.array([[dx], [dy]]) 
         #self.radar_detections[self.radar_track_id] = (np.array([self.radar_angle_body, self.radar_range, self.radar_track_id,
         #    [self.posterior_vel.x, self.posterior_vel.y], [self.posterior_pos_cov.var_x, self.posterior_pos_cov.var_y, self.posterior_pos_cov.cor_xy], 
         #    [self.posterior_vel_cov.var_x, self.posterior_vel_cov.var_y, self.posterior_vel_cov.cor_xy]]))
-        #self.detections.append(radar_pixel)
+        self.detections.append(radar_pixel)
 
         self.target[radar_track_id] = 0
         #cv2.line(self.warp, (self.radar_pixel, 0), (self.radar_pixel, self.height), (0,255,0), 10)
@@ -480,7 +506,6 @@ class DetectObjects(object):
         #result = self.dark_client.get_result()
     def darknet_callback(self, status, result):
         #print('DARKNET feedback:  ', status, result.id)
-        #phi, theta, psi = self.euler_angles
         corners = None
         #corner = []
         h = self.height
@@ -518,10 +543,6 @@ class DetectObjects(object):
                         if corners is None:
                             corners = []
                         corners.append([obj,prob,np.array([xmin,ymin,xmax,ymax])])
-                        #bb_angle = (self.fov_pixel*(xmin+(xmax-xmin)/2-self.width/2)+self.number*np.deg2rad(self.Mounting_angle))
-                        #self.bb_angles.append(self.fov_pixel*(xmin+(xmax-xmin)/2-self.width/2)+self.looking_angle)
-                        #print(self.bb_angles)
-                        #cv2.rectangle(self.draw, (int(xmin), int(ymin)), (int(xmax), int(ymax   )), [0,0,255], 2)
 
                 self.corners = corners
             self.detect_ready = True
@@ -563,40 +584,42 @@ class DetectObjects(object):
         self.height, self.width = self.image.shape[:2]
         self.newimage = True
         
-    def re3_track(self, image, corners=None):  
-        
+    def re3_track(self, image, corners=None):   
         global initialize, boxToDraw#,tracker
-        if corners is not None:
-            if boxToDraw is None:# and all(corners) > 0:
-                boxToDraw = corners
-            #iou = bb_intersection_over_union(boxToDraw,corners)
-            #if iou < 0.3:
-            boxToDraw = tracker.track(image[:,:,::-1], 'Cam', corners)
-            self.penalty = 0
-        else:
+
+        if corners is None:
             try:
-                self.penalty += 1
-                if self.penalty < 50:
-                    boxToDraw = tracker.track(image[:,:,::-1], 'Cam')
-                else:
-                    boxToDraw = [0,0,0,0]
+                boxToDraw = tracker.track(image[:,:,::-1], 'Cam')
             except:
                 print("No Bbox to track")
 
+        if boxToDraw is not None and corners is not None:
+            iou = bb_intersection_over_union(boxToDraw,corners)
+            if iou < 0.3:
+                initialize = True
+                print ("UPDATED")
+
+        if initialize and corners is not None:
+            if 0 not in corners:
+                boxToDraw = corners
+                initialize = False
+                boxToDraw = tracker.track(image[:,:,::-1], 'Cam', boxToDraw)
+
+
         if boxToDraw is not None:
             if any(boxToDraw) != 0:
-                #bb_angles = []
+                bb_angles = []
                 #for a in boxToDraw:
                 b = boxToDraw
                 #print(a,b)
                 if ((abs(b[0]-b[2]) > 4) and (abs(b[1]-b[3]) > 4)):
-                    cv2.rectangle(self.draw, (int(b[0]), int(b[1])), (int(b[2]), int(b[3])), [0,0,255], 2)
-                    self.bb_angles.append(self.fov_pixel*(int(b[0])+(int(b[2])-int(b[0]))/2-self.width/2)+self.looking_angle)
-                    #self.bb_angles.append(self.fov_pixel*(xmin+(xmax-xmin)/2-self.width/2)+self.looking_angle+psi)
-                    #print(bb_angle)
-                    #self.bb_angles.append(bb_angle)
+                    cv2.rectangle(self.draw, (int(b[0]), int(b[1])), (int(b[2]), int(b[3])), 
+                        [0,0,255], 2)
+                    bb_angle = (self.fov_pixel*(int(b[0])+(int(b[2])-int(b[0]))/2-self.width/2)+self.number*np.deg2rad(self.Mounting_angle))
+                    print(bb_angle)
+                    self.bb_angles.append(bb_angle)
                 self.new_camera = True
-        
+
 
     def re3_multi_track(self, image, corners=None):
         box = {}
@@ -628,7 +651,7 @@ class DetectObjects(object):
                     self.b = bkey
                     bvalue = boxToDraw[bkey]
                     iou = 1
-                    #print('BBBBBBBBBBBBB',bvalue)
+
                     if ((abs(bvalue[0]-bvalue[2]) > 4) and (abs(bvalue[1]-bvalue[3]) > 4)):
                         iou = bb_intersection_over_union(bvalue,cvalue)
                         if iou == 0:
@@ -730,17 +753,17 @@ class DetectObjects(object):
                 print("No Bbox to track")
         if boxToDraw is not None:
             if any(boxToDraw) != 0:
-                #bb_angles = []
+                bb_angles = []
                 for a in boxToDraw:
                     b = boxToDraw[a]
                     #print(a,b)
                     if ((abs(b[0]-b[2]) > 4) and (abs(b[1]-b[3]) > 4)):
                         cv2.rectangle(self.draw, (int(b[0]), int(b[1])), (int(b[2]), int(b[3])), 
                             [0,0,255], 2)
-                        self.bb_angles.append(self.fov_pixel*(int(b[0])+(int(b[2])-int(b[0]))/2-self.width/2)+self.looking_angle)
-                        #print(bb_angle)
-                        #self.bb_angles.append(bb_angle)
-                #self.new_camera = True
+                        bb_angle = (self.fov_pixel*(int(b[0])+(int(b[2])-int(b[0]))/2-self.width/2)+self.number*np.deg2rad(self.Mounting_angle))
+                        print(bb_angle)
+                        self.bb_angles.append(bb_angle)
+                self.new_camera = True
                 
 
                     
@@ -876,8 +899,8 @@ class DetectObjects(object):
         
 
     def start(self):
-        #self.EKF_init()
-        self.rate = rospy.Rate(50)
+        self.EKF_init()
+        self.rate = rospy.Rate(100)
         # Subscribers
         rospy.Subscriber('/seapath/pose',geomsg.PoseStamped, self.pose_callback)
         rospy.Subscriber('/radar/estimates', automsg.RadarEstimate, self.radar_callback)
@@ -891,12 +914,12 @@ class DetectObjects(object):
 
             if self.newimage == True:
                 self.newimage = False
-                self.looking_angle = np.deg2rad(self.Mounting_angle*self.number)
+                self.looking_angle = np.deg2rad(0+self.Mounting_angle)*self.number
                 if self.looking_angle > np.pi:
                     self.looking_angle -= 2*np.pi
                 elif self.looking_angle < -np.pi:
                     self.looking_angle += 2*np.pi
-                #print(self.looking_angle)
+                camera_mounting_offset = 3
                 phi, theta, psi = self.euler_angles
                 self.rotate_along_axis(self.image, -phi, -theta, -self.looking_angle,
                     0,-self.angle_2_pixel(theta)*np.cos(self.looking_angle)+self.angle_2_pixel(phi)*np.sin(self.looking_angle),0)
@@ -919,7 +942,7 @@ class DetectObjects(object):
                     tile = self.warp[h//3:(h//3)*2,(w//3)*i:(w//3)*i+(w//3)]
 
                     self.call_server(tile, i)
-                
+
                 if self.corners is not None:
                     self.corners.sort(reverse = True, key=lambda x :x[1])
                     for c in self.corners:
@@ -927,40 +950,33 @@ class DetectObjects(object):
                             #print(c)
                             if c[2][3] < self.height/2+50:
                                 corner = [np.array(c[2])]
-                        #else:
-                        #    if c[2][3] < self.height/2+50:
-                        #        corner.append(np.array(c[2]))
+                        else:
+                            if c[2][3] < self.height/2+50:
+                                corner.append(np.array(c[2]))
                     
                     if corner == []:
                         #self.template_tracker(self.warp)
-                        self.re3_track(self.warp)
-                        #self.re3_multi_track(self.warp)
+                        #self.re3_track(self.warp)
+                        self.re3_multi_track(self.warp)
                     else:
                         #c = []
                         #c.append(corner[0])
                         #self.template_tracker(self.yolo_image, c)
-                        self.re3_track(self.yolo_image, corner[0])
-                        #self.re3_multi_track(self.yolo_image, corner)
+                        #corner = corner[0]
+                        #self.re3_track(self.yolo_image, corner)
+                        self.re3_multi_track(self.yolo_image, corner)
                 else:
                     #self.template_tracker(self.warp)
-                    self.re3_track(self.warp)
-                    #self.re3_multi_track(self.warp)
-                
+                    #self.re3_track(self.warp)
+                    self.re3_multi_track(self.warp)
+
                     
                 for d in self.detections:
                     cv2.line(self.draw, (d+int(w/2), 0), (d+int(w/2), h), (255,0,0), 10)
                 self.detections = []
-                for d in self.c_detections:
-                    cv2.line(self.draw, (d+int(w/2), 0), (d+int(w/2), h), (0,255,0), 8)
-                self.c_detections = []
 
-                #cv2.line(self.draw, (d+int(w/2), 0), (d+int(w/2), h), (255,0,0), 10)
                 cv2.imshow('Cam3', self.draw)
                 cv2.waitKey(1)
-                plt.plot(float(self.position.y), float(self.position.x), '+b')
-                plt.draw()   
-                plt.pause(0.001)
-
                 #self.count += 1
 
                 '''

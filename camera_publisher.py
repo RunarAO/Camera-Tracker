@@ -87,10 +87,10 @@ class SendImage(object):
 
     def start(self):
         bridge = CvBridge()
-        self.number = 0
-        self.Mounting_angle = 72       # 5 cameras, 360/5=72
+        #self.number = 0
+        #self.Mounting_angle = 72       # 5 cameras, 360/5=72
 
-        im_dir = "/home/runar/Skrivebord/0"
+        im_dir = "/home/runar/Skrivebord/4"
         file_list = os.listdir(im_dir)
         sorted_file_list = sorted(file_list)#, key=lambda x:x[-30:])
         i = 1#4300
