@@ -28,17 +28,17 @@ from re3.constants import OUTPUT_WIDTH
 from re3.constants import OUTPUT_HEIGHT
 from re3.constants import PADDING
 
-import autosea_msgs.msg as automsg
+#import autosea_msgs.msg as automsg
 import std_msgs.msg as stdmsg
-import geometry_msgs.msg as geomsg
-import autoseapy.conversion as conv
+#import geometry_msgs.msg as geomsg
+#import autoseapy.conversion as conv
 from rospy.numpy_msg import numpy_msg
 from sensor_msgs.msg import Image
-from autoseapy.local_state import munkholmen
-import autoseapy.definitions as defs
+#from autoseapy.local_state import munkholmen
+#import autoseapy.definitions as defs
 #from sensor_msgs.msg import CameraInfo
-import darknet_ros_msgs.msg as darknetmsg
-from darknet_ros_msgs.msg import CheckForObjectsAction, CheckForObjectsGoal
+#import darknet_ros_msgs.msg as darknetmsg
+#from darknet_ros_msgs.msg import CheckForObjectsAction, CheckForObjectsGoal
 
 
 boxToDraw = None#np.zeros(4)
@@ -70,6 +70,7 @@ class Re3Tracker(object):
         self.pose_arr = []
         self.newimage = False
         self.corner = None
+        self.penalty = 0
 
     def pose_callback(self, msg):
         self.pose_stamp = float(str(msg.header.stamp))/1e9
@@ -202,26 +203,35 @@ class Re3Tracker(object):
             if iou == 0:
                 initialize = True
                 print("New track")
-            elif iou < 0.2:
+            elif iou < 0.4:
                 initialize = True
                 print("Updated track") 
             if initialize:
                 boxToDraw = corners
                 initialize = False
                 boxToDraw = tracker.track(image[:,:,::-1], 'Cam', boxToDraw)
+                self.penalty = 0
                 print(boxToDraw)
+            else:
+                boxToDraw = tracker.track(image[:,:,::-1], 'Cam')
         else:
             try:
+                self.penalty += 1
                 boxToDraw = tracker.track(image[:,:,::-1], 'Cam')
             except:
                 print("No Bbox to track")
-        return boxToDraw
-        if boxToDraw is not None:
-            if ((abs(boxToDraw[0]-boxToDraw[2]) > 4) and (abs(boxToDraw[1]-boxToDraw[3]) > 4)):
-                cv2.rectangle(self.draw, (int(boxToDraw[0]), int(boxToDraw[1])), (int(boxToDraw[2]), int(boxToDraw[3])), 
-                    [0,0,255], 2)
-                self.bb_angle = self.fov_pixel*(int(boxToDraw[0])+(int(boxToDraw[2])-int(boxToDraw[0]))/2-self.width/2)+self.number*np.deg2rad(self.Mounting_angle)
-    
+        if self.penalty < 50:
+            a = boxToDraw
+            b = stdmsg.Float32MultiArray(data=a)
+            self.bb_publisher.publish(b)
+            #return boxToDraw
+        
+            if boxToDraw is not None:
+                if ((abs(boxToDraw[0]-boxToDraw[2]) > 4) and (abs(boxToDraw[1]-boxToDraw[3]) > 4)):
+                    cv2.rectangle(self.image, (int(boxToDraw[0]), int(boxToDraw[1])), (int(boxToDraw[2]), int(boxToDraw[3])), 
+                        [0,0,255], 2)
+                    #self.bb_angle = self.fov_pixel*(int(boxToDraw[0])+(int(boxToDraw[2])-int(boxToDraw[0]))/2-self.width/2)+self.number*np.deg2rad(self.Mounting_angle)
+        
     
     def rotation_3D(self, phi, theta, psi):
         # Rotation matrices around the X, Y, and Z axis
@@ -256,27 +266,45 @@ class Re3Tracker(object):
         z = 1
         return [x, y, z]
 
+    def bb_callback(self, msg):
+        #print(msg)
+        #self.newBB = True
+        self.corner = msg.data
+
+    def im_callback(self, msg):
+        bridge = CvBridge()
+        self.image = bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
+        #self.image = bridge.imgmsg_to_cv2(msg, "bgr8")
+        self.height, self.width = self.image.shape[:2]
+        self.newimage = True
+
     def start(self):
         # Subscribers
-        rospy.Subscriber('/seapath/pose',geomsg.PoseStamped, self.pose_callback)
+        #rospy.Subscriber('/seapath/pose',geomsg.PoseStamped, self.pose_callback)
         #rospy.Subscriber('/radar/estimates', automsg.RadarEstimate, self.radar_callback)
-        rospy.Subscriber('/ladybug/camera0/image_raw', Image, self.image_callback)
-        rospy.Subscriber('/darknet_ros/check_for_objects/result',darknetmsg.CheckForObjectsActionResult, self.darknet_callback)
+        #rospy.Subscriber('/ladybug/camera0/image_raw', Image, self.image_callback)
+        #rospy.Subscriber('/darknet_ros/check_for_objects/result',darknetmsg.CheckForObjectsActionResult, self.darknet_callback)
+        rospy.Subscriber('/re3/bbox_new', stdmsg.Float32MultiArray , self.bb_callback)
+        rospy.Subscriber('/re3/image', Image , self.im_callback)
+
+        self.bb_publisher = rospy.Publisher('/re3/bbox', stdmsg.Float32MultiArray, queue_size=1)
 
         while not rospy.is_shutdown():
             if self.newimage == True:
-                self.newimagen = False
+                self.newimage = False
                 if self.corner is not None:
                     self.show_webcam(self.image, self.corner)
                 else:
                     self.show_webcam(self.image)
                 self.corner = None
+                cv2.imshow('Cam2', self.image)
+                cv2.waitKey(1)
 
 # Main function
 if __name__ == '__main__':
     #cv2.namedWindow('Cam', cv2.WINDOW_NORMAL)
-    #cv2.namedWindow('Cam2', cv2.WINDOW_NORMAL)
-    cv2.namedWindow('Cam3', cv2.WINDOW_NORMAL) 
+    cv2.namedWindow('Cam2', cv2.WINDOW_NORMAL)
+    #cv2.namedWindow('Cam3', cv2.WINDOW_NORMAL) 
     
     tracker = re3_tracker.Re3Tracker()
     rospy.init_node("Re3Tracker")
