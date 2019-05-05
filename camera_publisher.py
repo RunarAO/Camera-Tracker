@@ -85,12 +85,12 @@ class SendImage(object):
             self.imagetimestamp = self.newimagetimestamp
             print('Timestamp updated')
 
-    def start(self):
+    def start(self, number):
         bridge = CvBridge()
         #self.number = 0
         #self.Mounting_angle = 72       # 5 cameras, 360/5=72
 
-        im_dir = "/home/runar/Skrivebord/4"
+        im_dir = ("/home/runar/Skrivebord/%s" %number)
         file_list = os.listdir(im_dir)
         sorted_file_list = sorted(file_list)#, key=lambda x:x[-30:])
         i = 1#4300
@@ -134,7 +134,13 @@ class SendImage(object):
 
 # Main function
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--number", "-n", help="set camera number")
+    args = parser.parse_args()
+    if args.number:
+        number = args.number  
+        print("set camera number to %s" % args.number)
     #cv2.namedWindow('Cam', cv2.WINDOW_NORMAL)
     rospy.init_node("CameraImage")
     DetectObjects_node = SendImage()   
-    DetectObjects_node.start()
+    DetectObjects_node.start(number)

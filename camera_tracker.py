@@ -9,6 +9,7 @@ import rospy
 import os
 import time
 import sys
+import getopt
 import math
 import struct
 from cv_bridge import CvBridge, CvBridgeError
@@ -59,6 +60,7 @@ np.set_printoptions(suppress=True)
 
 boxToDraw = None#np.zeros(4)
 initialize = True
+#number = None
 
 
 
@@ -251,7 +253,7 @@ class DetectObjects(object):
         self.track_id = None
         self.looking_angle = 0
         self.focal = 1350
-        self.number = 4
+        self.number = None
         self.Mounting_angle = 72       # 5 cameras, 360/5=72
         self.camera_offset = np.deg2rad(-3)        # psi degrees between camera and vessel
         self.radar_offset = np.deg2rad(3)         # psi degrees between radar and vessel
@@ -1130,8 +1132,9 @@ class DetectObjects(object):
 
         
 
-    def start(self):
+    def start(self, number):
         #self.EKF_init()
+        self.number = int(number)
         self.rate = rospy.Rate(self.updateRate)
         n = self.total_images = 6   #Antall bilder kuttet langs horisonten
         self.window = None
@@ -1336,6 +1339,13 @@ class DetectObjects(object):
 
 # Main function
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--number", "-n", help="set camera number")
+    args = parser.parse_args()
+    if args.number:
+        number = args.number  
+        print("set camera number to %s" % args.number)
+
     #cv2.namedWindow('Cam', cv2.WINDOW_NORMAL)
     #cv2.namedWindow('Cam2', cv2.WINDOW_NORMAL)
     cv2.namedWindow('Cam3', cv2.WINDOW_NORMAL) 
@@ -1349,4 +1359,4 @@ if __name__ == '__main__':
     #telemetron_tf = TransformListener()
 
     DetectObjects_node = DetectObjects()   
-    DetectObjects_node.start()
+    DetectObjects_node.start(number)
