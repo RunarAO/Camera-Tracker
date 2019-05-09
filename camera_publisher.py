@@ -41,6 +41,7 @@ class SendImage(object):
         # Params
         self.firstimage = None
         self.newimagetimestamp = 0
+        self.pose_stamp = 0
 
         # Node cycle rate (in Hz).
         self.rate = rospy.Rate(10)
@@ -124,13 +125,13 @@ class SendImage(object):
                 #print(self.euler_angles)
                 self.imageNametoTimestamp(self.image_time)
 
-            image = cv2.imread(im_dir + '/' + sorted_file_list[i-51]) #51 fits 11.50 bag
+            image = cv2.imread(im_dir + '/' + sorted_file_list[i-50]) #51 fits 11.50 bag
             #ret_val, image = self.cam.read()
             #cv2.imshow('Cam',image)
             #cv2.waitKey(1)
             im = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
             self.pub_image.publish(im)
-            self.rate.sleep()
+            #self.rate.sleep()
 
 # Main function
 if __name__ == '__main__':

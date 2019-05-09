@@ -134,7 +134,7 @@ class ExtendedKalman():
                 gain[:,[0,1]] = 0
             else:
                 gain = self.gain
-                gain[:,[2]] = 0
+                #gain[:,[2]] = 0
             #self.estimate = self.estimate
         #else:
             '''
@@ -213,7 +213,7 @@ class DetectObjects(object):
         self.new_radar = []
         self.new_camera = False
         #self.myEstimate = [[0],[0],[0],[0]]
-
+        self.newcameramtx = None
         self.templates = {}
         self.temp_num = 0
         self.corners = None
@@ -252,13 +252,15 @@ class DetectObjects(object):
         self.range = 100
         self.track_id = None
         self.looking_angle = 0
-        self.focal = 1350
+        self.focal = 1640#1350
         self.number = None
         self.Mounting_angle = 72       # 5 cameras, 360/5=72
-        self.camera_offset = np.deg2rad(-3)        # psi degrees between camera and vessel
+        self.camera_offset = np.deg2rad(-2)        # psi degrees between camera and vessel
         self.radar_offset = np.deg2rad(3)         # psi degrees between radar and vessel
-        self.fov_radians = np.deg2rad(100)      #FOV is about 100 deg
-        self.fov_pixel = self.fov_radians/1616#self.width
+        self.fov_radians_hor = np.deg2rad(106.8) #106.8 #92      #FOV is about 90-100 deg
+        self.fov_radians_ver = np.deg2rad(114.6)      #FOV is about 110 deg
+        self.fov_pixel_hor = self.fov_radians_hor/1616#self.width
+        self.fov_pixel_ver = self.fov_pixel_hor #self.fov_radians_ver/1932#self.height ca
 
         self.matrix = None
         self.penalty = np.zeros([100])
@@ -267,12 +269,14 @@ class DetectObjects(object):
         self.updateRate = 50
         self.dT = 1./self.updateRate    #Timestep
         self.decay = 0.95
-        sigma_cv = 0.4    #Process noise strength
-        sigma_r = 0.1   #Sensor noise strength
-        sigma_c = 0.1   #Sensor noise strength
+        sigma_cv = 0.5    #Process noise strength
+        sigma_r = 0.05   #Sensor noise strength
+        sigma_c = 0.05   #Sensor noise strength
         #self.processNoise = np.diag([1.0, 1.0, 1.0, 1.0])**2  # predict state covariance
         self.radarNoise = sigma_r**2 * np.identity(3) #diag([10., 10.])**2  # Observation x,y position covariance
-        self.cameraNoise = sigma_c**2 * np.identity(3)
+        self.cameraNoise = sigma_c**2 * np.array([[1,0,0],
+                                                  [0,1,0],
+                                                  [0,0,1]])
         '''self.processNoiseCovariance = sigma_cv**2 * np.array([[(self.dT**4)/4,0, (self.dT**3)/2,0,0,0],
                                                              [0, (self.dT**4)/4, 0,(self.dT**3)/2,0,0],
                                                              [(self.dT**3)/2, 0, (self.dT**2),  0,0,0],
@@ -373,12 +377,12 @@ class DetectObjects(object):
             angle_body = self.angle_ned - self.psi - self.looking_angle + self.radar_offset     # Installation angle offset between radar and vessel  
             
             #print('AAAAA',angle_body,self.bb_angles)
-            
+            '''
             if angle_body < -np.pi:
                 angle_body += 2*np.pi
             elif angle_body > np.pi:
                 angle_body -= 2*np.pi  
-            
+            '''
             #print('xy',est_x,est_y)
             est_range = np.sqrt(est_x**2+est_y**2)
             #print(psi, angle_ned, angle_body, est_range)
@@ -407,14 +411,15 @@ class DetectObjects(object):
                     for k in self.bb_angles:
                         #camera_pixel = int(k/self.fov_pixel)
                         #self.c_detections.append(camera_pixel)
-                        print('ANGLE: ',abs(self.angle_ned-k),k,self.angle_ned, self.psi)
+                        #print('ANGLE: ',abs(self.angle_ned-k),k,self.angle_ned, angle_body, self.psi)
                         a.append([abs(self.angle_ned-k), k])
                     if a != []:
                         #print(a)
                         b = min(a, key=lambda x: x[0])
-                        c = b[1] - self.looking_angle + self.camera_offset - self.psi
+                        c = b[1] + self.camera_offset
+                        d = c - self.looking_angle - self.psi
                         #print(np.rad2deg(c),c, b, max(a, key=lambda x: x[0]))
-                        y = np.array([0,0, c]).reshape(-1,1)
+                        y = np.array([0,0, d]).reshape(-1,1)
                         R = self.cameraNoise 
                         angle_only = True
                         
@@ -424,8 +429,8 @@ class DetectObjects(object):
                         #if a != []:
                         #b = min(abs(a[0]))
                         #b = min(a, key=lambda x: x[0])
-                        dx = float(est_range*np.cos(b[1]))
-                        dy = float(est_range*np.sin(b[1]))
+                        dx = float(est_range*np.cos(c))
+                        dy = float(est_range*np.sin(c))
                         #if abs(est_x-dx) < 100 and abs(est_y-dy) < 100 and b[0] < np.deg2rad(10):
                         #print(dx,dy)
                         #if b[0] < np.deg2rad(5):
@@ -441,7 +446,7 @@ class DetectObjects(object):
                             #g = self.kf[i].getGain()
                             #p = self.kf[i].getP()
                             #est = self.kf[i].getEstimate()
-                        plt.plot(float(dy+self.position.y), float(dx+self.position.x), 'ob')
+                        plt.plot(float(dy+self.position.y), float(dx+self.position.x), '+g')
                         #print('est:  ',y)
                         #print(g)
                         #print(p)
@@ -449,7 +454,7 @@ class DetectObjects(object):
             if est_range < 1000:
                 radar_angle_image = angle_body #-np.pi/4
                 #print(radar_angle_image, angle_body, self.looking_angle)
-                radar_pixel = int(radar_angle_image/self.fov_pixel)
+                radar_pixel = int(radar_angle_image/self.fov_pixel_hor)
                 self.detections.append(radar_pixel)
                 
             #if y is not None:
@@ -656,10 +661,10 @@ class DetectObjects(object):
                     corners.append([d[0],d[1],np.array([xmin,ymin,xmax,ymax])])
                     if  abs(xw) > 4 and abs(yh) > 4:
                         cv2.rectangle(self.draw2, (int(xmin), int(ymin)), (int(xmax), int(ymax)), [0,0,255], 2)
-                        bb_angle = self.fov_pixel*(xmin + (xmax-xmin)/2 - self.width/2)
+                        bb_angle = self.fov_pixel_hor*(xmin + (xmax-xmin)/2 - self.width/2)
                         self.bb_angles.append(bb_angle)# + self.looking_angle + self.camera_offset - self.psi)
                         print(bb_angle)
-                        camera_pixel = int(bb_angle/self.fov_pixel)
+                        camera_pixel = int(bb_angle/self.fov_pixel_hor)
                         self.c_detections.append(camera_pixel)
                         print('detected')
         self.corners = corners  
@@ -715,7 +720,7 @@ class DetectObjects(object):
                         pose = self.warppose[2] - self.psi
                         dx = 0#self.angle_2_pixel(pose)
                         #print('DX:   ',dx)
-                        corners.append([obj,prob,np.array([xmin-10,ymin-10,xmax+10,ymax+10])])
+                        corners.append([obj,prob,np.array([xmin,ymin,xmax,ymax])])
                         
                         #a = {}
                         #bb_angle = (self.fov_pixel*(xmin+(xmax-xmin)/2 + dx) + self.looking_angle + self.detection)
@@ -759,13 +764,46 @@ class DetectObjects(object):
         bridge = CvBridge()
         img = bridge.imgmsg_to_cv2(msg, "bgr8")
         h, w = img.shape[:2]
-        #self.focal = 1350
-        #mtx = np.matrix('1350.41716 0.0 1038.58110; 0.0 1352.74467 1219.10680; 0.0 0.0 1.0')
-        self.mtx = np.matrix('1350.0 0.0 1024.0; 0.0 1350.0 1232.0; 0.0 0.0 1.0')
-        #distort = np.array([-0.293594324, 0.0924910801, -0.000795067830, 0.000154218667, -0.0129375553])
-        self.distort = np.array([-0.29, 0.09, -0.0, 0.0, -0.013])
+        '''
+        [[1.35041667e+03 0.00000000e+00 1.03858079e+03]
+         [0.00000000e+00 1.35274414e+03 1.21910677e+03]
+         [0.00000000e+00 0.00000000e+00 1.00000000e+00]] 
 
-        self.newcameramtx, roi=cv2.getOptimalNewCameraMatrix(self.mtx,self.distort,(w,h),1,(w,h))
+         [[-2.93594198e-01  9.24909708e-02 -7.95066732e-04  1.54260738e-04 -1.29375283e-02]] 
+        '''
+        '''
+        [[3.95727787e+03 0.00000000e+00 1.08515402e+03]
+         [0.00000000e+00 6.68367696e+03 1.16446525e+03]
+         [0.00000000e+00 0.00000000e+00 1.00000000e+00]] 
+
+         [[-2.30366701e+00  1.62378114e+01  1.69321678e-02 -2.40693536e-02 -5.05074466e+01]] 
+
+        '''
+        '''
+        [[1.63663691e+03 0.00000000e+00 1.02370792e+03]
+         [0.00000000e+00 1.64782940e+03 1.21251137e+03]
+         [0.00000000e+00 0.00000000e+00 1.00000000e+00]] 
+
+         [[-3.77040452e-01  1.63930763e-01  1.18141456e-04 -7.53546679e-04 -3.30016468e-02]] 
+
+        '''
+        '''
+        [[1.31005536e+03 0.00000000e+00 1.02682398e+03]
+         [0.00000000e+00 1.30521483e+03 1.29066719e+03]
+         [0.00000000e+00 0.00000000e+00 1.00000000e+00]] 
+
+        [[-0.28836847  0.09049513 -0.00382027 -0.00036971 -0.01279517]] 
+        '''
+        if self.newcameramtx is None:
+            #self.focal = 1350
+            #mtx = np.matrix('1350.41716 0.0 1038.58110; 0.0 1352.74467 1219.10680; 0.0 0.0 1.0')
+            #self.mtx = np.matrix('1350.0 0.0 1024.0; 0.0 1350.0 1232.0; 0.0 0.0 1.0')
+            self.mtx = np.matrix('1600.0 0.0 1024.0; 0.0 1600.0 1232.0; 0.0 0.0 1.0')
+            #distort = np.array([-0.293594324, 0.0924910801, -0.000795067830, 0.000154218667, -0.0129375553])
+            #self.distort = np.array([-0.29, 0.09, -0.0, 0.0, -0.013])
+            self.distort = np.array([-0.38, 0.16, -0.0001, -0.00075, -0.033])
+
+            self.newcameramtx, roi=cv2.getOptimalNewCameraMatrix(self.mtx,self.distort,(w,h),1,(w,h))
 
         # crop the image
         cropx, cropy = [216, 600]
@@ -786,27 +824,30 @@ class DetectObjects(object):
         #print(msg)
         if msg is not None:
             array = msg.data
-            xmin = array[0]
-            ymin = array[1]
-            xmax = array[2]
-            ymax = array[3]
+            if array == []:
+                print('Empty bounding box')
+            else:
+                xmin = array[0]
+                ymin = array[1]
+                xmax = array[2]
+                ymax = array[3]
+                
+                a = np.array([int(self.detection-wwindow/2), ((h//2)-(h//n)/2), int(self.detection-wwindow/2), ((h//2)-(h//n)/2)]) #-(w//n)/2+w/2
+                c = np.add(array, a)
+                #print('ABC',array,c)
+                if ((abs(xmax-xmin) > 4) and (abs(ymax-ymin) > 4)):
+                    cv2.rectangle(self.draw2, (int(xmin), int(ymin)), (int(xmax), int(ymax)), [0,0,255], 2)
+                    cv2.rectangle(self.draw, (int(c[0]), int(c[1])), (int(c[2]), int(c[3])), [0,0,255], 2)
+                    bb_angle = (self.fov_pixel_hor*(c[0]+(c[2]-c[0])/2))# + self.looking_angle 
+                    #bb_angle = (self.fov_pixel*(xmin+(xmax-xmin)/2 + dx) + self.looking_angle + self.detection)
+                    #print(bb_angle, np.rad2deg(bb_angle))
+                    camera_pixel = int(bb_angle/self.fov_pixel_hor)
+                    #angle_body = self.angle_ned - self.psi - self.looking_angle + self.radar_offset
+                    self.c_detections.append(camera_pixel)
+                    self.bb_angles = []
+                    self.bb_angles.append(bb_angle + self.psi + self.looking_angle + self.camera_offset)
+                    #print(self.bb_angles,np.rad2deg(self.bb_angles[0]))
             
-            a = np.array([int(self.detection-wwindow/2), ((h//2)-(h//n)/2), int(self.detection-wwindow/2), ((h//2)-(h//n)/2)]) #-(w//n)/2+w/2
-            c = np.add(array, a)
-            print('ABC',array,c)
-            if ((abs(xmax-xmin) > 4) and (abs(ymax-ymin) > 4)):
-                cv2.rectangle(self.draw2, (int(xmin), int(ymin)), (int(xmax), int(ymax)), [0,0,255], 2)
-                cv2.rectangle(self.draw, (int(c[0]), int(c[1])), (int(c[2]), int(c[3])), [0,0,255], 2)
-                bb_angle = (self.fov_pixel*(c[0]+(c[2]-c[0])/2))# + self.looking_angle 
-                #bb_angle = (self.fov_pixel*(xmin+(xmax-xmin)/2 + dx) + self.looking_angle + self.detection)
-                print(bb_angle, np.rad2deg(bb_angle))
-                camera_pixel = int(bb_angle/self.fov_pixel)
-                #angle_body = self.angle_ned - self.psi - self.looking_angle + self.radar_offset
-                self.c_detections.append(camera_pixel)
-                self.bb_angles = []
-                self.bb_angles.append(bb_angle + self.psi + self.looking_angle + self.camera_offset)
-                print(self.bb_angles,np.rad2deg(self.bb_angles[0]))
-        
         
     def re3_track(self, image, angle, corners=None):  
         h = self.height
@@ -993,7 +1034,7 @@ class DetectObjects(object):
                     if ((abs(b[0]-b[2]) > 4) and (abs(b[1]-b[3]) > 4)):
                         cv2.rectangle(self.draw, (int(b[0]), int(b[1])), (int(b[2]), int(b[3])), 
                             [0,0,255], 2)
-                        self.bb_angles.append(self.fov_pixel*(b[0]+(b[2]-b[0])/2 -self.width/2)+self.looking_angle + self.psi)
+                        self.bb_angles.append(self.fov_pixel_hor*(b[0]+(b[2]-b[0])/2 -self.width/2)+self.looking_angle + self.psi)
                         #print(bb_angle)
                         #self.bb_angles.append(bb_angle)
                 #self.new_camera = True
@@ -1041,13 +1082,13 @@ class DetectObjects(object):
                         
             
     def pixel_2_angle(self, x, y, z=0):
-        x_angle = x*self.fov_pixel-(self.width/2)*self.fov_pixel+np.deg2rad(self.Mounting_angle)
-        y_angle = y*self.fov_pixel-(self.height/2)*self.fov_pixel
+        x_angle = x*self.fov_pixel_hor-(self.width/2)*self.fov_pixel_hor+np.deg2rad(self.Mounting_angle)
+        y_angle = y*self.fov_pixel_hor-(self.height/2)*self.fov_pixel_hor
         z_angle = z
         return [x_angle, y_angle, z_angle] 
 
     def angle_2_pixel(self, r):
-        return (r/self.fov_pixel)#+(self.width/2)#-np.deg2rad(self.Mounting_angle*self.fov_pixel)
+        return (r/self.fov_pixel_hor)#+(self.width/2)#-np.deg2rad(self.Mounting_angle*self.fov_pixel)
         #y = (ry/self.fov_pixel)#+(self.height/2)
         #z = 1
         #return [x, y, z]
@@ -1156,12 +1197,11 @@ class DetectObjects(object):
         bb_publisher = rospy.Publisher('/re3/bbox_new', stdmsg.Float32MultiArray, queue_size=1)
         im_publisher = rospy.Publisher('/re3/image', Image, queue_size=1)
 
-        print('FOV',self.fov_pixel,self.fov_radians)
+        print('FOV',self.fov_pixel_hor,self.fov_radians_hor)
 
         while not rospy.is_shutdown():
 
             corner = []
-            self.extended_kalman()
             c = []
             i = 0
 
@@ -1172,7 +1212,7 @@ class DetectObjects(object):
                 #print(self.looking_angle)
                 phi, theta, psi = self.euler_angles
                 self.rotate_along_axis(self.image, -phi, -theta, -self.looking_angle,
-                    0,-self.angle_2_pixel(theta)*np.cos(self.looking_angle)+self.angle_2_pixel(phi)*np.sin(self.looking_angle),0)
+                    0,-(theta/self.fov_pixel_ver)*np.cos(self.looking_angle)+(phi/self.fov_pixel_ver)*np.sin(self.looking_angle),0)
                 self.warppose = self.euler_angles
                 self.count+=1
                 '''
@@ -1261,7 +1301,7 @@ class DetectObjects(object):
                 '''   
                 for i in range(len(self.detections)):
                     self.detection = det = self.detections[i]
-                    print(det)
+                    #print(det)
                     self.window = self.warp[int((h//2)-(h//n)/2):int((h//2)+(h//n)/2),int(det-(w//n)/2+w/2):int(det+(w//n)/2+w/2)]
                     self.draw2 = self.window.copy()
                     #print(self.window.shape[:])#cv2.imshow('Cam', self.draw2)
@@ -1303,7 +1343,7 @@ class DetectObjects(object):
                             im_publisher.publish(rosImg)
 
                         cv2.line(self.draw, (det+int(w/2), 0), (det+int(w/2), h), (255,0,0), 10)
-                        cv2.imshow('Cam', self.draw2)
+                        #cv2.imshow('Cam', self.draw2)
                         break
                 
                 self.detections = []
@@ -1319,8 +1359,8 @@ class DetectObjects(object):
                 cv2.waitKey(1)
                 plt.plot(float(self.position.y), float(self.position.x), '+b')
                 plt.draw()   
-                plt.pause(0.001)
-                self.newimage = False
+                plt.pause(0.00001)
+                #self.newimage = False
 
                 #self.count += 1
 
@@ -1333,6 +1373,7 @@ class DetectObjects(object):
                  [ 0.239118  0.892399  0.382683]
                  [ 0.965926 -0.258819  0.      ]]   # 90 deg
                 '''
+            self.extended_kalman()
             self.rate.sleep()
 
 

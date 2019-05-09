@@ -220,18 +220,21 @@ class Re3Tracker(object):
                 boxToDraw = tracker.track(image[:,:,::-1], 'Cam')
             except:
                 print("No Bbox to track")
-        if self.penalty < 50:
-            a = boxToDraw
-            b = stdmsg.Float32MultiArray(data=a)
-            self.bb_publisher.publish(b)
-            #return boxToDraw
-        
+        if self.penalty > 50:
+            boxToDraw = None
+        else:
             if boxToDraw is not None:
                 if ((abs(boxToDraw[0]-boxToDraw[2]) > 4) and (abs(boxToDraw[1]-boxToDraw[3]) > 4)):
                     cv2.rectangle(self.image, (int(boxToDraw[0]), int(boxToDraw[1])), (int(boxToDraw[2]), int(boxToDraw[3])), 
                         [0,0,255], 2)
                     #self.bb_angle = self.fov_pixel*(int(boxToDraw[0])+(int(boxToDraw[2])-int(boxToDraw[0]))/2-self.width/2)+self.number*np.deg2rad(self.Mounting_angle)
-        
+                    a = boxToDraw
+                    b = stdmsg.Float32MultiArray(data=a)
+                    self.bb_publisher.publish(b)
+                    #return boxToDraw
+                else:
+                    boxToDraw = None
+
     
     def rotation_3D(self, phi, theta, psi):
         # Rotation matrices around the X, Y, and Z axis
