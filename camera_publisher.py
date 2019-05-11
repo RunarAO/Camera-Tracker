@@ -46,14 +46,18 @@ class SendImage(object):
         # Node cycle rate (in Hz).
         self.rate = rospy.Rate(10)
         rospy.Subscriber('/seapath/pose',geomsg.PoseStamped, self.pose_callback)
-        self.pub_image = rospy.Publisher('/ladybug/camera0/image_raw', Image, queue_size=1)
+        self.pub_image0 = rospy.Publisher('/ladybug/camera0/image_raw', Image, queue_size=1)
+        self.pub_image1 = rospy.Publisher('/ladybug/camera1/image_raw', Image, queue_size=1)
+        self.pub_image2 = rospy.Publisher('/ladybug/camera2/image_raw', Image, queue_size=1)
+        self.pub_image3 = rospy.Publisher('/ladybug/camera3/image_raw', Image, queue_size=1)
+        self.pub_image4 = rospy.Publisher('/ladybug/camera4/image_raw', Image, queue_size=1)
 
 
     def pose_callback(self, msg):
         self.pose_stamp = float(str(msg.header.stamp))/1e9
-        quat = msg.pose.orientation
-        q_b_w = np.array([quat.x, quat.y, quat.z, quat.w])
-        self.euler_angles = conv.quaternion_to_euler_angles(q_b_w)
+        #quat = msg.pose.orientation
+        #q_b_w = np.array([quat.x, quat.y, quat.z, quat.w])
+        #self.euler_angles = conv.quaternion_to_euler_angles(q_b_w)
 
 
     def imageNametoTimestamp(self, stamp):
@@ -70,6 +74,7 @@ class SendImage(object):
             second = int(stamp[30:32])
             imagetime = datetime(year, month, day, hour, minute, int(second), int((second%1)*1000))
             self.firstimagetimestamp = time.mktime(imagetime.timetuple())
+        '''    
         else:
             day = int(stamp[23:25])        ## Issues arrives at midnight
             month = int(stamp[21:23])
@@ -79,7 +84,7 @@ class SendImage(object):
             second = int(stamp[30:32])
             imagetime = datetime(year, month, day, hour, minute, int(second), int((second%1)*1000))
             self.newimagetimestamp = time.mktime(imagetime.timetuple())
-
+        '''
         milli = int(stamp[60:66])
         self.imagetimestamp = self.firstimagetimestamp + (milli-self.firstimage)/10. + offset
         if self.newimagetimestamp > self.imagetimestamp:
@@ -88,50 +93,68 @@ class SendImage(object):
 
     def start(self, number):
         bridge = CvBridge()
+        sorted_file_list = {}
         #self.number = 0
         #self.Mounting_angle = 72       # 5 cameras, 360/5=72
-
-        im_dir = ("/home/runar/Skrivebord/%s" %number)
-        file_list = os.listdir(im_dir)
-        sorted_file_list = sorted(file_list)#, key=lambda x:x[-30:])
+        for cam in range(5): 
+            im_dir = ("/home/runar/Skrivebord/%s" %cam)
+            file_list = os.listdir(im_dir)
+            sorted_file_list[cam] = sorted(file_list)#, key=lambda x:x[-30:])
         i = 1#4300
-        self.cam = cv2.VideoCapture('/home/runar/Ladybug/output0.mp4')
+        #self.cam = cv2.VideoCapture('/home/runar/Ladybug/output0.mp4')
         #self.cam.set(1, 17000)
   
-        self.image_time = str(sorted_file_list[i])
+        self.image_time = str(sorted_file_list[0][i])
         self.imageNametoTimestamp(self.image_time)
  
         while not rospy.is_shutdown():
             if (self.imagetimestamp - self.pose_stamp) < -2:
                 i += int(abs(self.imagetimestamp - self.pose_stamp))
-                self.image_time = str(sorted_file_list[i])
+                self.image_time = str(sorted_file_list[0][i])
                 print("WAY SMALLER",self.imagetimestamp-self.pose_stamp, i) 
                 self.imageNametoTimestamp(self.image_time)
             elif (self.imagetimestamp - self.pose_stamp) < -0.06:
                 i += 2# + int(abs(self.imagetimestamp - self.pose_stamp))
-                self.image_time = str(sorted_file_list[i])
-                #print("SMALLER",self.imagetimestamp-self.pose_stamp, i) 
+                self.image_time = str(sorted_file_list[0][i])
+                print("SMALLER",self.imagetimestamp-self.pose_stamp, i) 
                 self.imageNametoTimestamp(self.image_time)
             elif (self.imagetimestamp - self.pose_stamp) > 0.06:
                 if (self.imagetimestamp - self.pose_stamp) > 10:
                     i = 1       # Restart due to bag file restarted
                     print('LARGER',self.imagetimestamp-self.pose_stamp, i)
-                    self.image_time = str(sorted_file_list[i])
+                    self.image_time = str(sorted_file_list[0][i])
                     self.imageNametoTimestamp(self.image_time)
             else:
                 i += 1# + int(abs(self.imagetimestamp - self.pose_stamp))
-                self.image_time = str(sorted_file_list[i])
+                self.image_time = str(sorted_file_list[0][i])
                 #print("GOOD",self.imagetimestamp-self.pose_stamp, i) 
                 #print(self.euler_angles)
                 self.imageNametoTimestamp(self.image_time)
 
-            image = cv2.imread(im_dir + '/' + sorted_file_list[i-50]) #51 fits 11.50 bag
-            #ret_val, image = self.cam.read()
-            #cv2.imshow('Cam',image)
-            #cv2.waitKey(1)
-            im = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
-            self.pub_image.publish(im)
-            #self.rate.sleep()
+            for cam in range(5):
+            #imdir = ("/home/runar/Skrivebord/%s" %number)
+            #print(imdir, str(sorted_file_list[0][i-50]))
+                try:
+                    imdir = ("/home/runar/Skrivebord/%s" %cam)
+                    if cam == 0:
+                        image = cv2.imread(imdir + '/' + str(sorted_file_list[cam][i-50])) #51 fits 11.50 bag
+                        im = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
+                        self.pub_image0.publish(im)
+                    #elif number == 1:
+                    #    self.pub_image1.publish(im)
+                    #elif number == 2:
+                    #    self.pub_image2.publish(im)
+                    elif cam == 3:
+                        image = cv2.imread(imdir + '/' + str(sorted_file_list[cam][i-50])) #51 fits 11.50 bag
+                        im = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
+                        self.pub_image3.publish(im)
+                    elif cam == 4:
+                        image = cv2.imread(imdir + '/' + str(sorted_file_list[cam][i-50])) #51 fits 11.50 bag
+                        im = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
+                        self.pub_image4.publish(im)
+                except:
+                    print('No such image')
+            self.rate.sleep()
 
 # Main function
 if __name__ == '__main__':
@@ -139,7 +162,7 @@ if __name__ == '__main__':
     parser.add_argument("--number", "-n", help="set camera number")
     args = parser.parse_args()
     if args.number:
-        number = args.number  
+        number = int(args.number)  
         print("set camera number to %s" % args.number)
     #cv2.namedWindow('Cam', cv2.WINDOW_NORMAL)
     rospy.init_node("CameraImage")

@@ -185,7 +185,7 @@ class ExtendedKalman():
         #update variables for next round
         self.previousEstimate = self.estimate
         self.previousGain = self.gain
-        self.previousErrorPrediction = self.errorPrediction;
+        self.previousErrorPrediction = self.errorPrediction
         #print(self.gain,self.errorPrediction)
         #print('prev',self.previousEstimate)
         
@@ -227,8 +227,9 @@ class DetectObjects(object):
         #self.tile = []
         #self.tiles = []
         self.newimage = False
-        self.image = []
-        self.warp = []
+        self.image = {}
+        self.draw = None
+        self.warp = {}
         #self.image3 = []
         #self.radar_img = []
         self.dark_id = None
@@ -243,7 +244,7 @@ class DetectObjects(object):
         self.hour = None
         self.newimagetimestamp = 0
         self.radar_pixel = 0
-        self.detections = []
+        self.detections = {}
         self.c_detections = []
         self.radar_detections = {}
         self.angle_ned = 0
@@ -251,10 +252,11 @@ class DetectObjects(object):
         self.bb_angles = []
         self.range = 100
         self.track_id = None
+        self.im_attitude = {}
         self.looking_angle = 0
         self.focal = 1640#1350
         self.number = None
-        self.Mounting_angle = 72       # 5 cameras, 360/5=72
+        self.Mounting_angle = np.deg2rad(72)       # 5 cameras, 360/5=72
         self.camera_offset = np.deg2rad(-2)        # psi degrees between camera and vessel
         self.radar_offset = np.deg2rad(3)         # psi degrees between radar and vessel
         self.fov_radians_hor = np.deg2rad(106.8) #106.8 #92      #FOV is about 90-100 deg
@@ -337,8 +339,8 @@ class DetectObjects(object):
         self.sensorNoise = self.radarNoise
         initialCovariance = [[cov[0][0],cov[0][1],0,0],
                              [cov[1][0],cov[1][1],0,0],
-                             [0,0,0,0],
-                             [0,0,0,0]]
+                             [0,0,50,0],
+                             [0,0,0,50]]
         self.kf[i] = ExtendedKalman(initialReading,initialCovariance, 1,4,self.sensorNoise, self.f, self.h, self.processNoiseCovariance)
 
 
@@ -374,15 +376,15 @@ class DetectObjects(object):
             if abs(est_xdot) > 100 or abs(est_ydot) > 100:
                 self.target[i] = 2000
             self.angle_ned = np.arctan2(est_y,est_x)
-            angle_body = self.angle_ned - self.psi - self.looking_angle + self.radar_offset     # Installation angle offset between radar and vessel  
+            angle_body = self.angle_ned - self.psi + self.radar_offset #- self.looking_angle     # Installation angle offset between radar and vessel  
             
             #print('AAAAA',angle_body,self.bb_angles)
-            '''
+            
             if angle_body < -np.pi:
                 angle_body += 2*np.pi
             elif angle_body > np.pi:
                 angle_body -= 2*np.pi  
-            '''
+            
             #print('xy',est_x,est_y)
             est_range = np.sqrt(est_x**2+est_y**2)
             #print(psi, angle_ned, angle_body, est_range)
@@ -455,7 +457,9 @@ class DetectObjects(object):
                 radar_angle_image = angle_body #-np.pi/4
                 #print(radar_angle_image, angle_body, self.looking_angle)
                 radar_pixel = int(radar_angle_image/self.fov_pixel_hor)
-                self.detections.append(radar_pixel)
+                #self.detections.append(radar_pixel)
+                #print(i, self.detections, angle_body)
+                self.detections[i] = angle_body
                 
             #if y is not None:
             self.kf[i].update(y, R, angle_only)
@@ -564,6 +568,8 @@ class DetectObjects(object):
         posterior_vel = msg.posterior.vel_est
         self.posterior_pos_cov[radar_track_id] =    [[msg.posterior.pos_cov.var_x, msg.posterior.pos_cov.cor_xy],
                                                     [msg.posterior.pos_cov.cor_xy, msg.posterior.pos_cov.var_y]]
+        #self.posterior_vel_cov[radar_track_id] =    [[msg.posterior.vel_cov.var_x, msg.posterior.vel_cov.cor_xy],
+        #                                            [msg.posterior.vel_cov.cor_xy, msg.posterior.vel_cov.var_y]]
         #print(self.posterior_pos_cov)
         #posterior_vel_cov = msg.posterior.vel_cov
         #print(self.posterior_pos, self.posterior_vel)
@@ -713,7 +719,7 @@ class DetectObjects(object):
                         xmax = float(xmax)
                         ymax = float(ymax)
 
-                    if obj == '"boat"' and prob > 0.1:
+                    if (obj == '"boat"' or obj == '"surfboard"')and prob > 0.2:
                         if corners is None:
                             corners = []
                         #if ymin < self.height/2+10 and ymax > self.height/2-10:     #Only around the horizon
@@ -760,10 +766,25 @@ class DetectObjects(object):
         #return self.corners
 
 
-    def image_callback(self, msg):
+    def image_callback(self, msg, number):
+        #print(number)
         bridge = CvBridge()
         img = bridge.imgmsg_to_cv2(msg, "bgr8")
         h, w = img.shape[:2]
+        '''
+        [[2.33059692e+03 0.00000000e+00 1.05054296e+03]
+         [0.00000000e+00 2.40544541e+03 1.20236899e+03]
+         [0.00000000e+00 0.00000000e+00 1.00000000e+00]] 
+
+         [[-0.61446217  0.54264669 -0.00584968 -0.01961701 -0.21955527]] 
+        '''
+        '''
+        [[1.63663691e+03 0.00000000e+00 1.02370792e+03]
+         [0.00000000e+00 1.64782940e+03 1.21251137e+03]
+         [0.00000000e+00 0.00000000e+00 1.00000000e+00]] 
+
+         [[-3.77040452e-01  1.63930763e-01  1.18141456e-04 -7.53546679e-04 -3.30016468e-02]] 
+        '''
         '''
         [[1.35041667e+03 0.00000000e+00 1.03858079e+03]
          [0.00000000e+00 1.35274414e+03 1.21910677e+03]
@@ -810,9 +831,13 @@ class DetectObjects(object):
 
         dst = cv2.undistort(img, self.mtx, self.distort, None, self.newcameramtx)
         h, w = dst.shape[:2]
-        self.image = dst[cropy:h-cropy, cropx:w-cropx]
+        self.number = number
+        #self.looking_angle = self.Mounting_angle*self.number
+        self.image[number] = dst[cropy:h-cropy, cropx:w-cropx]
+        self.im_attitude[number] = self.euler_angles
         
-        self.height, self.width = self.image.shape[:2]
+        self.height, self.width = self.image[number].shape[:2]
+
         self.newimage = True
         #print(self.height, self.width)
 
@@ -1082,7 +1107,7 @@ class DetectObjects(object):
                         
             
     def pixel_2_angle(self, x, y, z=0):
-        x_angle = x*self.fov_pixel_hor-(self.width/2)*self.fov_pixel_hor+np.deg2rad(self.Mounting_angle)
+        x_angle = x*self.fov_pixel_hor-(self.width/2)*self.fov_pixel_hor+self.Mounting_angle
         y_angle = y*self.fov_pixel_hor-(self.height/2)*self.fov_pixel_hor
         z_angle = z
         return [x_angle, y_angle, z_angle] 
@@ -1093,7 +1118,7 @@ class DetectObjects(object):
         #z = 1
         #return [x, y, z]
         
-    def rotate_along_axis(self, image, phi=0, theta=0, psi=0, dx=0, dy=0, dz=0):
+    def rotate_along_axis(self, image, number, phi=0, theta=0, psi=0, dx=0, dy=0, dz=0):
         # Get ideal focal length on z axis
         dz = self.focal*1.
         #axis = np.float32([[3,0,0], [0,3,0], [0,0,3]]).reshape(-1,3)
@@ -1101,9 +1126,12 @@ class DetectObjects(object):
         # Get projection matrix
         self.mat = self.get_M(phi, theta, psi, dx, dy, dz)
         #if len(np.shape(image)) > 2: 
-        self.warp = cv2.warpPerspective(image, self.mat, (self.width, self.height))
-        self.draw = self.warp.copy()
+        self.warp[number] = cv2.warpPerspective(image, self.mat, (self.width, self.height))
+        #if self.number == self.cameranumber:
+        #    self.draw = self.warp[self.number].copy()
         #else:
+        #    if self.draw == []:
+        #        self.draw = image
         #    return cv2.warpPerspective(image,self.mat)
         #print('WARP')
         
@@ -1175,13 +1203,13 @@ class DetectObjects(object):
 
     def start(self, number):
         #self.EKF_init()
-        self.number = int(number)
+        self.cameranumber = int(number)
         self.rate = rospy.Rate(self.updateRate)
         n = self.total_images = 6   #Antall bilder kuttet langs horisonten
         self.window = None
         h = self.height = 1264
         w = self.width = 1616
-        self.looking_angle = np.deg2rad(self.Mounting_angle*self.number)
+        self.looking_angle = 0 #np.deg2rad(self.Mounting_angle*self.number)
         if self.looking_angle > np.pi:
             self.looking_angle -= 2*np.pi
         elif self.looking_angle < -np.pi:
@@ -1190,7 +1218,11 @@ class DetectObjects(object):
         # Subscribers
         rospy.Subscriber('/seapath/pose',geomsg.PoseStamped, self.pose_callback)
         rospy.Subscriber('/radar/estimates', automsg.RadarEstimate, self.radar_callback)
-        rospy.Subscriber('/ladybug/camera0/image_raw', Image, self.image_callback)
+        rospy.Subscriber('/ladybug/camera0/image_raw', Image, self.image_callback, 0)
+        rospy.Subscriber('/ladybug/camera1/image_raw', Image, self.image_callback, 1)
+        rospy.Subscriber('/ladybug/camera2/image_raw', Image, self.image_callback, 2)
+        rospy.Subscriber('/ladybug/camera3/image_raw', Image, self.image_callback, 3)
+        rospy.Subscriber('/ladybug/camera4/image_raw', Image, self.image_callback, 4)
         rospy.Subscriber('/re3/bbox', stdmsg.Float32MultiArray , self.bb_callback)
         # Publishers
         self.dark_client = actionlib.SimpleActionClient('darknet_ros/check_for_objects', darknetmsg.CheckForObjectsAction)
@@ -1210,11 +1242,7 @@ class DetectObjects(object):
                 
                 
                 #print(self.looking_angle)
-                phi, theta, psi = self.euler_angles
-                self.rotate_along_axis(self.image, -phi, -theta, -self.looking_angle,
-                    0,-(theta/self.fov_pixel_ver)*np.cos(self.looking_angle)+(phi/self.fov_pixel_ver)*np.sin(self.looking_angle),0)
-                self.warppose = self.euler_angles
-                self.count+=1
+                
                 '''
                 if self.ang is None:
                     self.ang = self.angle_ned
@@ -1299,13 +1327,55 @@ class DetectObjects(object):
                     self.re3_track(self.window)
                     #self.re3_multi_track(self.warp)
                 '''   
-                for i in range(len(self.detections)):
-                    self.detection = det = self.detections[i]
+                for i in self.detections:
+                    det = self.detections[i]
                     #print(det)
-                    self.window = self.warp[int((h//2)-(h//n)/2):int((h//2)+(h//n)/2),int(det-(w//n)/2+w/2):int(det+(w//n)/2+w/2)]
-                    self.draw2 = self.window.copy()
+                    if det > np.pi:
+                        det -= 2*np.pi
+                    elif det < -np.pi:
+                        det += 2*np.pi
+                    #pix = det/self.fov_pixel_hor
+                    #print(det)
+                    cam = None
+                    #try:
+                    if det > (0*self.Mounting_angle - np.deg2rad(40)) and det < (0*self.Mounting_angle + np.deg2rad(40)):
+                        #print('0')
+                        pix = (det+0*self.Mounting_angle)/self.fov_pixel_hor
+                        cam = 0
+                    #elif det > (1*self.Mounting_angle - np.deg2rad(40)) and det < (1*self.Mounting_angle + np.deg2rad(40)):
+                    #    pix = (det-1*self.Mounting_angle)/self.fov_pixel_hor
+                    #    cam = 1
+                    #elif det > (2*self.Mounting_angle - np.deg2rad(40)) and det < np.deg2rad(180):
+                    #    pix = (det-2*self.Mounting_angle)/self.fov_pixel_hor
+                    #    cam = 2
+                    elif det < -(1*self.Mounting_angle - np.deg2rad(40)) and det > -(1*self.Mounting_angle + np.deg2rad(40)):
+                        #print('4')
+                        pix = (det+1*self.Mounting_angle)/self.fov_pixel_hor
+                        cam = 4
+                    elif det < -(2*self.Mounting_angle - np.deg2rad(40)) and det > np.deg2rad(-180):
+                        #print('3')
+                        pix = (det+2*self.Mounting_angle)/self.fov_pixel_hor
+                        cam = 3
+                    else:
+                        print('None of the above')
+                    #print(cam)
+                    if cam is not None:
+                        phi, theta, psi = self.im_attitude[cam]
+                        self.looking_angle = self.Mounting_angle * cam
+                        self.number = cam
+                        self.detection = pix
+                        if self.image[cam] is not None:
+                            self.rotate_along_axis(self.image[cam], cam, -phi, -theta, -self.looking_angle,
+                                0,-(theta/self.fov_pixel_ver)*np.cos(self.looking_angle)+(phi/self.fov_pixel_ver)*np.sin(self.looking_angle),0)
+                            self.warppose = self.euler_angles
+                            self.count+=1
+                            self.window = self.warp[cam][int((h//2)-(h//n)/2):int((h//2)+(h//n)/2),int(pix-(w//n)/2+w/2):int(pix+(w//n)/2+w/2)]
+                            self.draw = self.warp[cam].copy()
+                            self.draw2 = self.window.copy()
+                            #print(det, pix)
+                
                     #print(self.window.shape[:])#cv2.imshow('Cam', self.draw2)
-                    if all(self.window.shape[:]) != 0:
+                    #if all(self.window.shape[:]) != 0:
                         bridge = CvBridge()
                         rosImg = bridge.cv2_to_imgmsg(self.window)#, encoding="passthrough")
                         #self.detector(i, n, net, meta, self.window, 0.1)
@@ -1342,11 +1412,13 @@ class DetectObjects(object):
                             #self.re3_multi_track(self.warp)
                             im_publisher.publish(rosImg)
 
-                        cv2.line(self.draw, (det+int(w/2), 0), (det+int(w/2), h), (255,0,0), 10)
+                        cv2.line(self.draw, (pix+int(w/2), 0), (pix+int(w/2), h), (255,0,0), 10)
                         #cv2.imshow('Cam', self.draw2)
-                        break
-                
-                self.detections = []
+                    break
+                    #except:
+                    #    print('Not valid detection angle')
+
+                self.detections = {}
                 for c in self.c_detections:
                     #print(d)
                     #self.window = self.warp[int((h//2)-(h//n)/2):int((h//2)+(h//n)/2),int(d-(w//n)/2+w/2):int(d+(w//n)/2+w/2)]
@@ -1355,7 +1427,9 @@ class DetectObjects(object):
                 
 
                 #cv2.line(self.draw, (d+int(w/2), 0), (d+int(w/2), h), (255,0,0), 10)
-                cv2.imshow('Cam3', self.draw)
+                #if self.number == self.cameranumber:
+                if self.draw is not None:
+                    cv2.imshow('Cam3', self.draw)
                 cv2.waitKey(1)
                 plt.plot(float(self.position.y), float(self.position.x), '+b')
                 plt.draw()   

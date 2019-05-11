@@ -300,8 +300,11 @@ class Re3Tracker(object):
                 else:
                     self.show_webcam(self.image)
                 self.corner = None
-                cv2.imshow('Cam2', self.image)
-                cv2.waitKey(1)
+                try:
+                    cv2.imshow('Cam2', self.image)
+                    cv2.waitKey(1)
+                except:
+                    print('No image')
 
 # Main function
 if __name__ == '__main__':
