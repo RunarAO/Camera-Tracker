@@ -137,7 +137,7 @@ class SendImage(object):
                 try:
                     imdir = ("/home/runar/Skrivebord/%s" %cam)
                     if cam == 0:
-                        image = cv2.imread(imdir + '/' + str(sorted_file_list[cam][i-50])) #51 fits 11.50 bag
+                        image = cv2.imread(imdir + '/' + str(sorted_file_list[cam][i-number])) #51 fits 11.50 bag
                         im = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
                         self.pub_image0.publish(im)
                     #elif number == 1:
@@ -145,11 +145,11 @@ class SendImage(object):
                     #elif number == 2:
                     #    self.pub_image2.publish(im)
                     elif cam == 3:
-                        image = cv2.imread(imdir + '/' + str(sorted_file_list[cam][i-50])) #51 fits 11.50 bag
+                        image = cv2.imread(imdir + '/' + str(sorted_file_list[cam][i-number])) #51 fits 11.50 bag
                         im = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
                         self.pub_image3.publish(im)
                     elif cam == 4:
-                        image = cv2.imread(imdir + '/' + str(sorted_file_list[cam][i-50])) #51 fits 11.50 bag
+                        image = cv2.imread(imdir + '/' + str(sorted_file_list[cam][i-number])) #51 fits 11.50 bag
                         im = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
                         self.pub_image4.publish(im)
                 except:

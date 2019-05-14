@@ -190,6 +190,7 @@ class Re3Tracker(object):
         print(self.euler_angles)
 
     def show_webcam(self, image, corners=None):
+        #print(corners)
         #self.image3 = self.warp.copy()
         h = self.height
         w = self.width
@@ -199,6 +200,7 @@ class Re3Tracker(object):
         if corners is not None:# and boxToDraw is not None:
             if boxToDraw is None:# and all(corners) > 0:
                 boxToDraw = corners
+                initialize = True
             iou = bb_intersection_over_union(boxToDraw,corners)
             if iou == 0:
                 initialize = True
@@ -270,7 +272,7 @@ class Re3Tracker(object):
         return [x, y, z]
 
     def bb_callback(self, msg):
-        #print(msg)
+        #print(msg.data)
         #self.newBB = True
         self.corner = msg.data
 
