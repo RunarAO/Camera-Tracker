@@ -13,6 +13,7 @@ import math
 import struct
 from cv_bridge import CvBridge, CvBridgeError
 from datetime import datetime
+#from vidstab import VidStab
 
 
 basedir = os.path.dirname(__file__)
@@ -40,7 +41,7 @@ from sensor_msgs.msg import Image
 #import darknet_ros_msgs.msg as darknetmsg
 #from darknet_ros_msgs.msg import CheckForObjectsAction, CheckForObjectsGoal
 
-
+#stabilizer = VidStab()
 boxToDraw = None#np.zeros(4)
 initialize = True
 
@@ -71,6 +72,11 @@ class Re3Tracker(object):
         self.newimage = False
         self.corner = None
         self.penalty = 0
+        self.time_past = 0
+        #self.previmg = None
+        #self.prev = None
+        
+
 
     def pose_callback(self, msg):
         self.pose_stamp = float(str(msg.header.stamp))/1e9
@@ -222,7 +228,7 @@ class Re3Tracker(object):
                 boxToDraw = tracker.track(image[:,:,::-1], 'Cam')
             except:
                 print("No Bbox to track")
-        if self.penalty > 50:
+        if self.penalty > self.iterations:
             boxToDraw = None
         else:
             if boxToDraw is not None:
@@ -280,10 +286,50 @@ class Re3Tracker(object):
         bridge = CvBridge()
         self.image = bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
         #self.image = bridge.imgmsg_to_cv2(msg, "bgr8")
+        '''
+        grayimage = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
+        if self.previmg is not None:
+            self.prev = cv2.goodFeaturesToTrack(grayimage,mask = None,maxCorners = 300, qualityLevel = 0.2, minDistance = 2, blockSize = 7)
+            #corners = np.int0(corners)
+            _nxt, status, error = cv2.calcOpticalFlowPyrLK(self.previmg, grayimage, self.prev, None, winSize = (15,15), maxLevel = 2, criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
+            # Selects good feature points for next position
+            good_new = _nxt[status == 1]
+            # Selects good feature points for previous position
+            #if self.prev is not None:
+            good_old = self.prev[status == 1]
+            #else:
+            #    good_old = good_new   
+            # Updates previous frame
+            # prev_gray = gray.copy()
+            # Updates previous good feature points
+            self.prev = good_new.reshape(-1, 1, 2)
+            
+            #_points, status, err = cv2.calcOpticalFlowPyrLK(self.previmg, grayimage, corners, np.array([]))
+            # Filter out valid points only
+            #points = _points[np.nonzero(status)]
+            #corners = corners[np.nonzero(status)]
+ 
+            h, w = grayimage.shape[:]
+            #h0,w0 = self.previmg.shape[:]
+            #hmin = min(h,h0)
+            #wmin = min(w,w0)
+            #greyprevimg = self.previmg[0:hmin,0:wmin]
+            #greyimage = self.image[0:hmin,0:wmin]
+            #print(good_old, good_new)
+            mat, _ = cv2.estimateAffinePartial2D(good_old, good_new)
+            #mat = cv2.estimateRigidTransform(good_old, good_new, 0)
+            #print(test,mat)
+            self.image = cv2.warpAffine(self.image,mat,(w,h))#,INTER_NEAREST|WARP_INVERSE_MAP)
+            #self.image = cv2.warpPerspective(self.image,mat,(w,h))
+            #self.window = cv2.findTransformECC(self.previmg, self.image, mat)
+        self.previmg = grayimage
+        '''
         self.height, self.width = self.image.shape[:2]
+        self.time_past = time.time()
         self.newimage = True
 
-    def start(self):
+    def start(self, number):
+        self.iterations = number
         # Subscribers
         #rospy.Subscriber('/seapath/pose',geomsg.PoseStamped, self.pose_callback)
         #rospy.Subscriber('/radar/estimates', automsg.RadarEstimate, self.radar_callback)
@@ -297,19 +343,29 @@ class Re3Tracker(object):
         while not rospy.is_shutdown():
             if self.newimage == True:
                 self.newimage = False
-                if self.corner is not None:
-                    self.show_webcam(self.image, self.corner)
+                if time.time() - self.time_past < 5: 
+                    if self.corner is not None:
+                        self.show_webcam(self.image, self.corner)
+                    else:
+                        self.show_webcam(self.image)
+                    self.corner = None
+                    try:
+                        cv2.imshow('Cam2', self.image)
+                        cv2.waitKey(1)
+                    except:
+                        print('No image')
                 else:
-                    self.show_webcam(self.image)
-                self.corner = None
-                try:
-                    cv2.imshow('Cam2', self.image)
-                    cv2.waitKey(1)
-                except:
-                    print('No image')
+                    boxToDraw = None
 
 # Main function
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--number", "-n", help="set camera number")
+    args = parser.parse_args()
+    if args.number:
+        number = int(args.number)  
+        print("set camera number to %s" % args.number)
+
     #cv2.namedWindow('Cam', cv2.WINDOW_NORMAL)
     cv2.namedWindow('Cam2', cv2.WINDOW_NORMAL)
     #cv2.namedWindow('Cam3', cv2.WINDOW_NORMAL) 
@@ -320,4 +376,4 @@ if __name__ == '__main__':
     #telemetron_tf = TransformListener()
 
     DetectObjects_node = Re3Tracker()   
-    DetectObjects_node.start()
+    DetectObjects_node.start(number)

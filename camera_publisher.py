@@ -42,15 +42,23 @@ class SendImage(object):
         self.firstimage = None
         self.newimagetimestamp = 0
         self.pose_stamp = 0
+        self.cam = 0
+        self.old = None
 
         # Node cycle rate (in Hz).
         self.rate = rospy.Rate(10)
         rospy.Subscriber('/seapath/pose',geomsg.PoseStamped, self.pose_callback)
+        rospy.Subscriber('/re3/camera', stdmsg.Int8, self.camera_callback)
         self.pub_image0 = rospy.Publisher('/ladybug/camera0/image_raw', Image, queue_size=1)
         self.pub_image1 = rospy.Publisher('/ladybug/camera1/image_raw', Image, queue_size=1)
         self.pub_image2 = rospy.Publisher('/ladybug/camera2/image_raw', Image, queue_size=1)
         self.pub_image3 = rospy.Publisher('/ladybug/camera3/image_raw', Image, queue_size=1)
         self.pub_image4 = rospy.Publisher('/ladybug/camera4/image_raw', Image, queue_size=1)
+
+    def camera_callback(self, msg):
+        if msg.data != self.cam:
+            self.old = self.cam
+            self.cam = msg.data
 
 
     def pose_callback(self, msg):
@@ -74,7 +82,7 @@ class SendImage(object):
             second = int(stamp[30:32])
             imagetime = datetime(year, month, day, hour, minute, int(second), int((second%1)*1000))
             self.firstimagetimestamp = time.mktime(imagetime.timetuple())
-        '''    
+            
         else:
             day = int(stamp[23:25])        ## Issues arrives at midnight
             month = int(stamp[21:23])
@@ -84,7 +92,7 @@ class SendImage(object):
             second = int(stamp[30:32])
             imagetime = datetime(year, month, day, hour, minute, int(second), int((second%1)*1000))
             self.newimagetimestamp = time.mktime(imagetime.timetuple())
-        '''
+        
         milli = int(stamp[60:66])
         self.imagetimestamp = self.firstimagetimestamp + (milli-self.firstimage)/10. + offset
         if self.newimagetimestamp > self.imagetimestamp:
@@ -94,14 +102,19 @@ class SendImage(object):
     def start(self, number):
         bridge = CvBridge()
         sorted_file_list = {}
+        video = {}
+        i_set = {}
         #self.number = 0
         #self.Mounting_angle = 72       # 5 cameras, 360/5=72
         for cam in range(5): 
             im_dir = ("/home/runar/Skrivebord/%s" %cam)
             file_list = os.listdir(im_dir)
             sorted_file_list[cam] = sorted(file_list)#, key=lambda x:x[-30:])
+            #video[cam] = cv2.VideoCapture('/home/runar/Ladybug/output%s.mp4' %cam)
+            #i_set[cam] = False
+        
         i = 1#4300
-        #self.cam = cv2.VideoCapture('/home/runar/Ladybug/output0.mp4')
+        
         #self.cam.set(1, 17000)
   
         self.image_time = str(sorted_file_list[0][i])
@@ -131,29 +144,38 @@ class SendImage(object):
                 #print(self.euler_angles)
                 self.imageNametoTimestamp(self.image_time)
 
-            for cam in range(5):
+            #for cam in range(5):
             #imdir = ("/home/runar/Skrivebord/%s" %number)
             #print(imdir, str(sorted_file_list[0][i-50]))
-                try:
-                    imdir = ("/home/runar/Skrivebord/%s" %cam)
-                    if cam == 0:
-                        image = cv2.imread(imdir + '/' + str(sorted_file_list[cam][i-number])) #51 fits 11.50 bag
-                        im = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
-                        self.pub_image0.publish(im)
-                    #elif number == 1:
-                    #    self.pub_image1.publish(im)
-                    #elif number == 2:
-                    #    self.pub_image2.publish(im)
-                    elif cam == 3:
-                        image = cv2.imread(imdir + '/' + str(sorted_file_list[cam][i-number])) #51 fits 11.50 bag
-                        im = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
-                        self.pub_image3.publish(im)
-                    elif cam == 4:
-                        image = cv2.imread(imdir + '/' + str(sorted_file_list[cam][i-number])) #51 fits 11.50 bag
-                        im = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
-                        self.pub_image4.publish(im)
-                except:
-                    print('No such image')
+            imdir = ("/home/runar/Skrivebord/%s" %self.cam)
+            image = cv2.imread(imdir + '/' + str(sorted_file_list[self.cam][i-number])) #51 fits 11.50 bag
+            #if abs(self.imagetimestamp-self.pose_stamp) < 0.06 and i_set[cam] == False:
+            #    video[cam].set(1, i-number)
+            #    i_set[cam] = True
+            #_,image = video[cam].read()
+            im = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
+            
+            try:
+                if self.cam == 0 or self.old == 0:
+                    #image = cv2.imread(imdir + '/' + str(sorted_file_list[cam][i-number])) #51 fits 11.50 bag
+                    #im = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
+                    self.pub_image0.publish(im)
+                if self.cam == 1 or self.old == 1:
+                    self.pub_image1.publish(im)
+                if self.cam == 2 or self.old == 2:
+                    self.pub_image2.publish(im)
+                if self.cam == 3 or self.old == 3:
+                    #image = cv2.imread(imdir + '/' + str(sorted_file_list[cam][i-number])) #51 fits 11.50 bag
+                    #im = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
+                    self.pub_image3.publish(im)
+                if self.cam == 4 or self.old == 4:
+                    #image = cv2.imread(imdir + '/' + str(sorted_file_list[cam][i-number])) #51 fits 11.50 bag
+                    #im = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
+                    self.pub_image4.publish(im)
+                self.old = None
+            except:
+                print('No such image')
+                
             self.rate.sleep()
 
 # Main function
