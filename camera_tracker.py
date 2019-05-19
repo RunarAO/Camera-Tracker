@@ -12,6 +12,7 @@ import sys
 import getopt
 import math
 import struct
+import random
 from cv_bridge import CvBridge, CvBridgeError
 #import tf
 #from tf import TransformListener
@@ -155,9 +156,11 @@ class ExtendedKalman():
             invVal = np.dot(jacVal, np.dot(self.errorPrediction, np.transpose(jacVal))) + self.R
             self.gain = np.dot(self.errorPrediction, np.dot(np.transpose(jacVal) , np.linalg.inv(invVal) ))
             self.errorPrediction = np.dot((np.identity(self.numStates) - np.dot(self.gain, jacVal)), self.errorPrediction)
+            '''
             print(self.estimate)
             print(self.gain)
             print(self.errorPrediction)
+            '''
         """
         Called second.
         Updates estimate according to combination of observed and prediction.
@@ -255,10 +258,13 @@ class DetectObjects(object):
         self.angle_ned = 0
         self.posterior_pos_cov = {}
         self.bb_angles = []
+        self.bb_anglesyolo = []
         self.range = 100
+        #self.delta = {}
         self.track_id = None
-        self.rx = {}
-        self.ry = {}
+        self.radar = {}
+        #self.ry = {}
+        self.ais = {}
         self.im_attitude = {}
         self.looking_angle = 0
         self.focal = 1640#1350
@@ -267,12 +273,14 @@ class DetectObjects(object):
         self.camera_offset = np.deg2rad(-3)        # psi degrees between camera and vessel
         self.radar_offset = np.deg2rad(3)         # psi degrees between radar and vessel
         self.fov_radians_hor = np.deg2rad(106.8) #106.8 #92      #FOV is about 90-100 deg
-        self.fov_radians_ver = np.deg2rad(114.6)      #FOV is about 110 deg
+        self.fov_radians_ver = np.deg2rad(70)      #FOV is about 110 deg
         self.fov_pixel_hor = self.fov_radians_hor/1616#self.width
-        self.fov_pixel_ver = self.fov_pixel_hor #self.fov_radians_ver/1932#self.height ca
+        self.fov_pixel_ver = self.fov_pixel_hor-0.0001 #self.fov_radians_ver/1264#self.height ca
 
         self.matrix = None
-        self.penalty = np.zeros([100])
+        self.penalty_radar = {}#np.zeros([100])
+        self.penalty_ais = {}
+        self.penalty = {}
 
         # Estimation parameter of EKF
         self.updateRate = 50
@@ -280,18 +288,22 @@ class DetectObjects(object):
         self.decay = 0.95
         sigma_cv = 0.5#100    #Process noise strength
         sigma_r = 0.4#5   #Sensor noise strength
-        sigma_a = 0.6#0.5   #Sensor noise strength
-        sigma_c = 0.05#0.5   #Sensor noise strength
+        sigma_a = 0.4#0.5   #Sensor noise strength
+        sigma_cd = 0.0005#0.5   #Sensor noise strength
+        sigma_ct = 0.005#0.5   #Sensor noise strength
         #self.processNoise = np.diag([1.0, 1.0, 1.0, 1.0])**2  # predict state covariance
         self.radarNoise =  sigma_r**2 * np.array([[1,0,0],
                                                   [0,1,0],
-                                                  [0,0,1]]) #diag([10., 10.])**2  # Observation x,y position covariance
+                                                  [0,0,0.11]]) #diag([10., 10.])**2  # Observation x,y position covariance
         self.aisNoise =  sigma_a**2 * np.array([[1,0,0],
-                                                  [0,1,0],
-                                                  [0,0,1]])
-        self.cameraNoise = sigma_c**2 * np.array([[80,0,0],
-                                                  [0,80,0],
-                                                  [0,0,1]])
+                                                [0,1,0],
+                                                [0,0,0.1]])
+        self.cameraNoise_yolo = np.array([[sigma_cv**2,0,0],
+                                            [0,sigma_cv**2,0],
+                                            [0,0,sigma_cd**2]])
+        self.cameraNoise_tracker = np.array([[2*sigma_cv**2,0,0],
+                                               [0,2*sigma_cv**2,0],
+                                               [0,0,sigma_ct**2]])
         '''self.processNoiseCovariance = sigma_cv**2 * np.array([[(self.dT**4)/4,0, (self.dT**3)/2,0,0,0],
                                                              [0, (self.dT**4)/4, 0,(self.dT**3)/2,0,0],
                                                              [(self.dT**3)/2, 0, (self.dT**2),  0,0,0],
@@ -310,7 +322,7 @@ class DetectObjects(object):
         self.sensorTransfer =  np.array([[1,0,0,0],
                                          [0,1,0,0]])
         self.myEstimate = {}
-        print(self.processNoiseCovariance)
+        #print(self.processNoiseCovariance)
     
     def f(self, x):
         #dT = 0.02
@@ -365,19 +377,25 @@ class DetectObjects(object):
         y1 = None
         R = self.radarNoise
         angle_only = False
+        
         #b = None
         radar_detections2 = self.radar_detections.copy()
         ais_detections = self.ais_detections.copy()
         for i in radar_detections2:
-            self.rx[i] = radar_detections2[i][0]
-            self.ry[i] = radar_detections2[i][1]
-            dx = self.rx[i]-self.position.x
-            dy = self.ry[i]-self.position.y
+            rx = radar_detections2[i][0]
+            ry = radar_detections2[i][1]
+            dx = rx-self.position.x
+            dy = ry-self.position.y
             r_range = np.sqrt(dx**2+dy**2)
+            if r_range < 2500:# or r_range > 1000:
+                self.radar[i] = [rx,ry]
+                self.penalty_radar[i] = 0
+                self.penalty[i] = 0
             if i not in self.kf and r_range < 1000:
                 self.EKF_init(i, radar_detections2[i], self.posterior_pos_cov[i])
                 self.kf[i].predict()
                 self.myEstimate[i] = self.kf[i].getEstimate()
+                #self.delta[i] = np.array([0,0,0,0]).reshape(-1,1)
         for i in self.target:
             if self.target[i] > 100:
                 del self.kf[i]
@@ -398,7 +416,11 @@ class DetectObjects(object):
             angle_body = angle_est - self.psi + self.radar_offset #- self.looking_angle     # Installation angle offset between radar and vessel  
             
             #print('AAAAA',angle_body,self.bb_angles)
-            
+            if angle_est < -np.pi:
+                angle_est += 2*np.pi
+            elif angle_est > np.pi:
+                angle_est -= 2*np.pi  
+
             if angle_body < -np.pi:
                 angle_body += 2*np.pi
             elif angle_body > np.pi:
@@ -410,7 +432,7 @@ class DetectObjects(object):
             
             
             for j in radar_detections2:
-                if i == j and est_range < 1200:
+                if i == j and (est_range < 2500):# or est_range > 1000) :
                     x0 = radar_detections2[j][0]
                     x1 = radar_detections2[j][1]
                     radar_angle = np.arctan2(x1-self.position.y, x0-self.position.x)
@@ -429,37 +451,85 @@ class DetectObjects(object):
             for a in ais_detections:
                 aisx = ais_detections[a][0]
                 aisy = ais_detections[a][1]
-                if np.sqrt((est_x-aisx)**2+(est_y-aisy)**2) < 50:
+                if np.sqrt((est_x-aisx)**2+(est_y-aisy)**2) < 100:
                     ais_angle = np.arctan2(aisy-self.position.y, aisx-self.position.x)
                     y1 = np.array([aisx,aisy,ais_angle]).reshape(-1,1)
                     R1 = self.aisNoise
                     plt.plot(float(aisy), float(aisx), 'ob', label= 'AIS' if 'AIS' \
                             not in plt.gca().get_legend_handles_labels()[1] else '')
+                    self.ais[i] = [aisx,aisy]
+                    self.penalty_ais[i] = 0
+                    self.penalty[i] = 0
+                    plot_ell = True
             else:
                 if est_range < 1000:
                     a = []
-                    for k in self.bb_angles:
-                        a.append([abs(angle_est-k), k])
-
+                    yolo = False
+                    for yo in self.bb_anglesyolo:
+                        diff = angle_est-yo
+                        if diff < -np.pi:
+                            diff += 2*np.pi
+                        elif diff > np.pi:
+                            diff -= 2*np.pi 
+                        if abs(diff) < np.deg2rad(10):
+                            a.append([abs(diff), yo])
+                            R = self.cameraNoise_yolo
+                            yolo = True
+                    else:
+                        for k in self.bb_angles:
+                            diff = angle_est-k
+                            if diff < -np.pi:
+                                diff += 2*np.pi
+                            elif diff > np.pi:
+                                diff -= 2*np.pi 
+                            if abs(diff) < np.deg2rad(10):
+                                a.append([abs(diff), k])
+                                R = self.cameraNoise_tracker
+                    #print(a, angle_est, angle_body)
                     if a != []:
                         b = min(a, key=lambda x: x[0])
                         c = b[1] + self.camera_offset
+                        if c < -np.pi:
+                            c += 2*np.pi
+                        elif c > np.pi:
+                            c -= 2*np.pi 
                         #d = c - self.looking_angle - self.psi
-                        print(c)
-                        y = np.array([float(self.rx[i]),float(self.ry[i]), c]).reshape(-1,1)
-                        #y = np.array([float(self.myEstimate[i][0]),float(self.myEstimate[i][1]), c]).reshape(-1,1)
-                        R = self.cameraNoise 
-                        #R = self.radarNoise
-                        angle_only = True
-                        
+                        #print(c)
                         dx = float(est_range*np.cos(c))
                         dy = float(est_range*np.sin(c))
 
-                        plt.plot(float(dy+self.position.y), float(dx+self.position.x), '+g', label= 'Camera' if 'Camera' \
+                        c_alpha = R[2][2]
+                        if i in self.penalty:
+                            y = np.array([float(dx+self.position.x) , float(dy+self.position.y) , c]).reshape(-1,1)
+                            self.penalty[i] += 1
+                            R = R * self.penalty[i]**2
+                            R[2][2] = c_alpha
+                        if i in self.ais:
+                            y = np.array([self.ais[i][0], self.ais[i][1], c]).reshape(-1,1)
+                            self.penalty_ais[i] += 1
+                            R = np.minimum(R,self.aisNoise)*self.penalty_ais[i]
+                            R[2][2] = c_alpha
+                        if i in self.radar:
+                            y = np.array([float(self.radar[i][0]),float(self.radar[i][1]), c]).reshape(-1,1)
+                            self.penalty_radar[i] += 1
+                            R = np.minimum(R,self.radarNoise)*self.penalty_radar[i]
+                            R[2][2] = c_alpha
+                        #R = self.cameraNoise 
+                        #R = self.radarNoise
+                        angle_only = True
+                        print(y)
+                        
+                        
+
+                        if yolo:
+                            plt.plot(float(dy+self.position.y), float(dx+self.position.x), 'og', label= 'Camera_Detector' if 'Camera_Detector' \
+                            not in plt.gca().get_legend_handles_labels()[1] else '')
+                        else:
+                            plt.plot(float(dy+self.position.y), float(dx+self.position.x), '+g', label= 'Camera_Tracker' if 'Camera_Tracker' \
                             not in plt.gca().get_legend_handles_labels()[1] else '')
                         #plt.plot(float(self.count) ,float(np.sqrt((self.myEstimate[i][0]-(dx+self.position.x))**2+(self.myEstimate[i][1]-(dy+self.position.y))**2)), '+g')
                         
-            if est_range < 1500:
+            if est_range < 2500:
                 #radar_angle_image = angle_body
             
                 #radar_pixel = int(radar_angle_image/self.fov_pixel_hor)
@@ -468,9 +538,12 @@ class DetectObjects(object):
             self.kf[i].update(y, R, angle_only)
             if y1 is not None:
                 self.kf[i].update(y1, R1, angle_only)
-                y1 = None
+            y = None
+            y1 = None
             #grab result for this iteration 
+            #old = self.myEstimate[i]
             self.myEstimate[i] = self.kf[i].getEstimate()
+            #self.delta[i] = np.subtract(self.myEstimate[i], old)
 
             plt.plot(float(self.myEstimate[i][1]), float(self.myEstimate[i][0]), '+k', label= 'Estimate' if 'Estimate' \
                             not in plt.gca().get_legend_handles_labels()[1] else '')
@@ -490,23 +563,33 @@ class DetectObjects(object):
                 ell.set_facecolor('none')
                 plt.axes().add_artist(ell)
 
-                nstd = 1
-                ixgrid = np.ix_([0, 1], [0, 1])
-                cov = np.array(self.posterior_pos_cov[i])
-                cov = cov[ixgrid]
-                vals, vecs = self.eigsorted(cov)
-                theta = np.degrees(np.arctan2(*vecs[:,0][::-1]))
-                w, h = 2 * nstd * np.sqrt(vals)
-                ell = Ellipse(xy=(float(self.ry[i]), float(self.rx[i])),
-                              width=w, height=h,
-                              angle=theta, color='red')
-                ell.set_facecolor('none')
-                plt.axes().add_artist(ell)
+                if i in self.radar:
+                    nstd = 1
+                    ixgrid = np.ix_([0, 1], [0, 1])
+                    cov = np.array(self.posterior_pos_cov[i])
+                    cov = cov[ixgrid]
+                    vals, vecs = self.eigsorted(cov)
+                    theta = np.degrees(np.arctan2(*vecs[:,0][::-1]))
+                    w, h = 2 * nstd * np.sqrt(vals)
+                    ell = Ellipse(xy=(float(self.radar[i][1]), float(self.radar[i][0])),
+                                  width=w, height=h,
+                                  angle=theta, color='red')
+                    ell.set_facecolor('none')
+                    plt.axes().add_artist(ell)
 
-
+            if i in self.penalty_ais:
+                if self.penalty_ais[i] > 20:
+                    del self.ais[i]
+                    del self.penalty_ais[i]
+            if i in self.penalty_radar:
+                if self.penalty_radar[i] > 20:    
+                    del self.radar[i]
+                    del self.penalty_radar[i]
+        
         self.radar_detections = {}
         self.ais_detections = {}
-        self.bb_angles = []  
+        self.bb_angles = []
+        self.bb_anglesyolo = []  
 
 
     def eigsorted(self, cov):
@@ -729,10 +812,14 @@ class DetectObjects(object):
                         corners.append([obj,prob,np.array([xmin,ymin,xmax,ymax])])
                         
                         bb_angle = (self.fov_pixel_hor*(c[0]+(c[2]-c[0])/2))
+                        if bb_angle < -np.pi:
+                            bb_angle += 2*np.pi
+                        elif bb_angle > np.pi:
+                            bb_angle -= 2*np.pi  
                         camera_pixel = int(bb_angle/self.fov_pixel_hor)
                         self.c_detections.append(camera_pixel)
-                        self.bb_angles = []
-                        self.bb_angles.append(bb_angle + self.psi + self.looking_angle) #+ self.camera_offset)
+                        self.bb_anglesyolo = []
+                        self.bb_anglesyolo.append(bb_angle + self.psi + self.looking_angle) #+ self.camera_offset)
 
                 self.corners = corners
                 self.darkpose = self.euler_angles
@@ -843,7 +930,10 @@ class DetectObjects(object):
                     cv2.rectangle(self.draw2, (int(xmin), int(ymin)), (int(xmax), int(ymax)), [0,0,255], 2)
                     cv2.rectangle(self.draw, (int(c[0]), int(c[1])), (int(c[2]), int(c[3])), [0,0,255], 2)
                     bb_angle = (self.fov_pixel_hor*(c[0]+(c[2]-c[0])/2))# + self.looking_angle 
-
+                    if bb_angle < -np.pi:
+                        bb_angle += 2*np.pi
+                    elif bb_angle > np.pi:
+                        bb_angle -= 2*np.pi 
                     camera_pixel = int(bb_angle/self.fov_pixel_hor)
 
                     self.c_detections.append(camera_pixel)
@@ -1197,6 +1287,7 @@ class DetectObjects(object):
         bb_publisher = rospy.Publisher('/re3/bbox_new', stdmsg.Float32MultiArray, queue_size=1)
         im_publisher = rospy.Publisher('/re3/image', Image, queue_size=1)
         cam_publiser = rospy.Publisher('/re3/camera', stdmsg.Int8, queue_size=1)
+        #track_publisher = rospy.Publisher('/re3/number', stdmsg.Int32, queue_size=1)
 
         print('FOV',self.fov_pixel_hor,self.fov_radians_hor)
 
@@ -1258,62 +1349,56 @@ class DetectObjects(object):
                             self.warppose = self.euler_angles
                             self.count+=1
                             self.window = self.warp[cam][int((h//2)-(h//n)/2):int((h//2)+(h//n)/2),int(pix-(w//n)/2+w/2):int(pix+(w//n)/2+w/2)]
-                            '''
-                            if self.previmg is not None:
-                                h, w = self.window.shape[:2]
-                                h0,w0 = self.previmg.shape[:2]
-                                hmin = min(h,h0)
-                                wmin = min(w,w0)
-                                self.previmg = self.previmg[0:hmin,0:wmin]
-                                self.window = self.window[0:hmin,0:wmin]
-                                #mat = cv2.getAffineTransform(self.previmg, self.window)
-                                mat = cv2.estimateRigidTransform(self.previmg, self.window, 0)
-                                print(mat)
-                                #self.window = cv2.warpAffine(self.window,mat,(wmin,hmin))#,INTER_NEAREST|WARP_INVERSE_MAP)
-                                #self.window = cv2.warpPerspective(self.window,mat,(wmin,hmin))
-                                self.window = cv2.findTransformECC(self.previmg, self.window,mat)
-                            '''
                             self.draw = self.warp[cam].copy()
                             self.draw2 = self.window.copy()
 
                         bridge = CvBridge()
                         rosImg = bridge.cv2_to_imgmsg(self.window)#, encoding="passthrough")
                         #self.detector(i, n, net, meta, self.window, 0.1)
-                        if (self.count % 3 == 0):# and self.detect_ready:
+                        if (self.count % 2 == 0):# and self.detect_ready:
                             self.yolo_attitude = self.im_attitude
                             self.call_server(self.window, i)
                             self.detect_ready = False
-                        
-                        if self.corners is not None:
+
+                        im_publisher.publish(rosImg)
+                        if self.corners is None:
+                            hh, ww = self.window.shape[:2]
+                            a0 = [ww/2,hh/2,ww/2,hh/2]
+                            b = stdmsg.Float32MultiArray(data=a0)
+                            #track_publisher.publish(int(i))
+                            bb_publisher.publish(b)
+                        else:
                             self.corners.sort(reverse = True, key=lambda x :x[1])
                             
-                            if self.corners == []:
+                            #if self.corners == []:
                                 #self.template_tracker(self.warp)
                                 #self.re3_track(self.window, det)
                                 #self.re3_multi_track(self.warp)
-                                im_publisher.publish(rosImg)
-                            else:
-                                phi_0, theta_0, psi_0 = self.yolo_attitude
-                                delta_psi = psi - psi_0
-                                delta_phi = phi - phi_0
-                                delta_theta = theta - theta_0
-                                y_change = -(delta_theta/self.fov_pixel_ver)*np.cos(self.looking_angle)+(delta_phi/self.fov_pixel_ver)*np.sin(self.looking_angle)
-                                x_change = delta_psi/self.fov_pixel_hor
-                                #print('DX, DY:   ',x_change, y_change)
-                                a_change = [x_change,y_change,x_change,y_change]
+                            #    im_publisher.publish(rosImg)
+                            if self.corners != []:#else:
+                                # phi_0, theta_0, psi_0 = self.yolo_attitude
+                                # delta_psi = psi - psi_0
+                                # delta_phi = phi - phi_0
+                                # delta_theta = theta - theta_0
+                                # y_change = -(delta_theta/self.fov_pixel_ver)*np.cos(self.looking_angle)+(delta_phi/self.fov_pixel_ver)*np.sin(self.looking_angle)
+                                # x_change = delta_psi/self.fov_pixel_hor
+                                # #print('DX, DY:   ',x_change, y_change)
+                                # a_change = [x_change,y_change,x_change,y_change]
                                 
                                 a0 = self.corners[0][2]
-                                a = np.add(a0, a_change)
+                                #a = np.add(a0, a_change)
                                 #print(a0,a_change,a)
-                                b = stdmsg.Float32MultiArray(data=a)
-                                im_publisher.publish(rosImg)
+                                b = stdmsg.Float32MultiArray(data=a0)
+                                #im_publisher.publish(rosImg)
+                                #track_publisher.publish(int(i))
                                 bb_publisher.publish(b)
-                                self.corners = None
-                        else:
+
+                            self.corners = None
+                        #else:
                             #self.template_tracker(self.warp)
                             #self.re3_track(self.window,det)
                             #self.re3_multi_track(self.warp)
-                            im_publisher.publish(rosImg)
+                        #    im_publisher.publish(rosImg)
                         
                         cv2.line(self.draw, (pix+int(w/2), 0), (pix+int(w/2), h), (255,0,0), 10)
                         #cv2.imshow('Cam', self.draw2)
