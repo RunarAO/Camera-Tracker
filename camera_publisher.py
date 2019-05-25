@@ -59,6 +59,7 @@ class SendImage(object):
         if msg.data != self.cam:
             self.old = self.cam
             self.cam = msg.data
+            print(self.cam, self.old)
 
 
     def pose_callback(self, msg):
@@ -70,12 +71,13 @@ class SendImage(object):
 
     def imageNametoTimestamp(self, stamp):
         #ladybug_18408820_20180927_124342_ColorProcessed_000699_Cam3_160568_024-3158.jpg
-        #print(stamp[23:25])
+        #print(stamp[48:54])
         offset = 0.
         if self.firstimage == None:
             day = int(stamp[23:25])        ## Issues arrives at midnight
             month = int(stamp[21:23])
             year = int(stamp[17:21])
+            #self.firstimage = int(stamp[48:54])
             self.firstimage = int(stamp[60:66])
             hour = int(stamp[26:28])
             minute = int(stamp[28:30])
@@ -94,7 +96,9 @@ class SendImage(object):
             self.newimagetimestamp = time.mktime(imagetime.timetuple())
         
         milli = int(stamp[60:66])
-        self.imagetimestamp = self.firstimagetimestamp + (milli-self.firstimage)/10. + offset
+        milli2 = int(stamp[72:75])
+        #milli = int(stamp[48:54])
+        self.imagetimestamp = self.firstimagetimestamp + (milli+(milli2/1000)-self.firstimage)/10. + offset
         if self.newimagetimestamp > self.imagetimestamp:
             self.imagetimestamp = self.newimagetimestamp
             print('Timestamp updated')
@@ -154,28 +158,59 @@ class SendImage(object):
             #    i_set[cam] = True
             #_,image = video[cam].read()
             im = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
+            #if self.old is not None:# != self.old:
+            '''
+            imdir = ("/home/runar/Skrivebord/0")
+            image = cv2.imread(imdir + '/' + str(sorted_file_list[0][i-number])) #51 fits 11.50 bag
+            im0 = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
+            imdir = ("/home/runar/Skrivebord/3")
+            image = cv2.imread(imdir + '/' + str(sorted_file_list[3][i-number])) #51 fits 11.50 bag
+            im3 = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
+            imdir = ("/home/runar/Skrivebord/4")
+            image = cv2.imread(imdir + '/' + str(sorted_file_list[4][i-number])) #51 fits 11.50 bag
+            im4 = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
+
+            self.pub_image0.publish(im0)
+            self.pub_image3.publish(im3)
+            self.pub_image4.publish(im4)
+            '''
+            #try:
+            if self.cam == 0:
+                #image = cv2.imread(imdir + '/' + str(sorted_file_list[cam][i-number])) #51 fits 11.50 bag
+                #im = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
+                self.pub_image0.publish(im)
+            if self.cam == 1:
+                self.pub_image1.publish(im)
+            if self.cam == 2:
+                self.pub_image2.publish(im)
+            if self.cam == 3:
+                #image = cv2.imread(imdir + '/' + str(sorted_file_list[cam][i-number])) #51 fits 11.50 bag
+                #im = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
+                self.pub_image3.publish(im)
+            if self.cam == 4:
+                #image = cv2.imread(imdir + '/' + str(sorted_file_list[cam][i-number])) #51 fits 11.50 bag
+                #im = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
+                self.pub_image4.publish(im)
             
-            try:
-                if self.cam == 0 or self.old == 0:
-                    #image = cv2.imread(imdir + '/' + str(sorted_file_list[cam][i-number])) #51 fits 11.50 bag
-                    #im = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
-                    self.pub_image0.publish(im)
-                if self.cam == 1 or self.old == 1:
-                    self.pub_image1.publish(im)
-                if self.cam == 2 or self.old == 2:
-                    self.pub_image2.publish(im)
-                if self.cam == 3 or self.old == 3:
-                    #image = cv2.imread(imdir + '/' + str(sorted_file_list[cam][i-number])) #51 fits 11.50 bag
-                    #im = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
-                    self.pub_image3.publish(im)
-                if self.cam == 4 or self.old == 4:
-                    #image = cv2.imread(imdir + '/' + str(sorted_file_list[cam][i-number])) #51 fits 11.50 bag
-                    #im = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
-                    self.pub_image4.publish(im)
-                self.old = None
-            except:
-                print('No such image')
-                
+            if self.old is not None and self.old != self.cam:
+                print('changed camera')
+                imdir = ("/home/runar/Skrivebord/%s" %self.old)
+                image = cv2.imread(imdir + '/' + str(sorted_file_list[self.old][i-number])) #51 fits 11.50 bag
+                im2 = bridge.cv2_to_imgmsg(image, 'bgr8')#encoding="passthrough")
+                if self.old == 0:
+                    self.pub_image0.publish(im2)
+                if self.old == 1:
+                    self.pub_image1.publish(im2)
+                if self.old == 2:
+                    self.pub_image2.publish(im2)
+                if self.old == 3:
+                    self.pub_image3.publish(im2)
+                if self.old == 4:
+                    self.pub_image4.publish(im2)
+            self.old = None
+            #except:
+            #    print('No such image')
+               
             self.rate.sleep()
 
 # Main function

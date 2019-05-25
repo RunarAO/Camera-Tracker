@@ -180,19 +180,21 @@ class Re3Tracker(object):
         self.time_past = time.time()
         self.newimage = True
 
-    def start(self, number, padding=0):
-        self.iterations = number
+    def start(self, number, length, padding=0):
+        
+        self.iterations = length
         #self.padding = padding
         # Subscribers
         #rospy.Subscriber('/seapath/pose',geomsg.PoseStamped, self.pose_callback)
         #rospy.Subscriber('/radar/estimates', automsg.RadarEstimate, self.radar_callback)
         #rospy.Subscriber('/ladybug/camera0/image_raw', Image, self.image_callback)
         #rospy.Subscriber('/darknet_ros/check_for_objects/result',darknetmsg.CheckForObjectsActionResult, self.darknet_callback)
-        rospy.Subscriber('/re3/bbox_new', stdmsg.Float32MultiArray , self.bb_callback)
-        rospy.Subscriber('/re3/image', Image , self.im_callback)
+        rospy.Subscriber(('/re3/bbox_new%s'%number), stdmsg.Float32MultiArray , self.bb_callback)
+        rospy.Subscriber(('/re3/image%s'%number), Image , self.im_callback)
 
-        self.bb_publisher = rospy.Publisher('/re3/bbox', stdmsg.Float32MultiArray, queue_size=1)
-
+        self.bb_publisher = rospy.Publisher('/re3/bbox%s'%number, stdmsg.Float32MultiArray, queue_size=1)
+        
+        print('Camera:', number)
         while not rospy.is_shutdown():
             if self.newimage == True:
                 self.newimage = False
@@ -205,7 +207,7 @@ class Re3Tracker(object):
                         self.show_webcam(self.image)
                     self.corner = None
                     try:
-                        cv2.imshow('Cam2', self.image)
+                        cv2.imshow(('Cam%s' %number), self.image)
                         cv2.waitKey(1)
                     except:
                         print('No image')
@@ -215,24 +217,30 @@ class Re3Tracker(object):
 # Main function
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("--number", "-n", help="set tracking history")
+    parser.add_argument("--number", "-n", help="set camera number")
+    parser.add_argument("--length", "-l", help="set tracking history length")
     parser.add_argument("--padding", "-p", help="set padding of bounding box")
     args = parser.parse_args()
     if args.number:
         number = int(args.number)  
         print("set parameters to %s" % args.number)
+    else:
+        number = 0
+    if args.length:
+        length = int(args.length)  
+        print("set parameters to %s" % args.length)
     if args.padding:
         padding = int(args.padding)  
         print("set parameters to %s" % args.padding)
 
     #cv2.namedWindow('Cam', cv2.WINDOW_NORMAL)
-    cv2.namedWindow('Cam2', cv2.WINDOW_NORMAL)
+    cv2.namedWindow('Cam%s'%number, cv2.WINDOW_NORMAL)
     #cv2.namedWindow('Cam3', cv2.WINDOW_NORMAL) 
     
     tracker = re3_tracker.Re3Tracker()
-    rospy.init_node("Re3Tracker")
+    rospy.init_node("Re3Tracker", anonymous=True)
     # Setup Telemetron ownship tracker
     #telemetron_tf = TransformListener()
 
     DetectObjects_node = Re3Tracker()   
-    DetectObjects_node.start(number, padding)
+    DetectObjects_node.start(number, length, padding)

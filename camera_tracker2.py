@@ -4,6 +4,8 @@ import argparse
 #import glob
 #from skimage import transform as sk_transform
 import numpy as np
+from numpy.linalg import norm
+from scipy.optimize import fmin
 #from scipy.spatial.transform import Rotation as R
 import rospy
 import os
@@ -22,6 +24,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
 from munkres import Munkres, print_matrix, make_cost_matrix
 import numdifftools as nd
+import numdifftools.nd_algopy as nda
 
 '''
 basedir = os.path.dirname(__file__)
@@ -225,8 +228,8 @@ class DetectObjects(object):
         self.corners = None
         self.detect_ready = True
         self.count = 0
+        self.imcount = 0
         self.index = 0
-        self.cam = 0
         #self.q_b_w = []
         self.pos = []
         #self.ned = []
@@ -273,7 +276,7 @@ class DetectObjects(object):
         self.focal = 1640#1350
         self.number = None
         self.Mounting_angle = np.deg2rad(72)       # 5 cameras, 360/5=72
-        self.camera_offset = np.deg2rad(-3)        # psi degrees between camera and vessel
+        self.camera_offset = np.deg2rad(-3.5)        # psi degrees between camera and vessel
         self.radar_offset = np.deg2rad(3)         # psi degrees between radar and vessel
         self.fov_radians_hor = np.deg2rad(106.8) #106.8 #92      #FOV is about 90-100 deg
         self.fov_radians_ver = np.deg2rad(70)      #FOV is about 110 deg
@@ -289,11 +292,11 @@ class DetectObjects(object):
         self.updateRate = 50
         self.dT = 1./self.updateRate    #Timestep
         self.decay = 0.95
-        sigma_cv = 0.5#100    #Process noise strength
+        sigma_cv = 0.45#100    #Process noise strength
         sigma_r = 0.4#5   #Sensor noise strength
         sigma_a = 0.4#0.5   #Sensor noise strength
-        sigma_cd = 0.005#0.5   #Sensor noise strength
-        sigma_ct = 0.05#0.5   #Sensor noise strength
+        sigma_cd = 0.001#0.5   #Sensor noise strength
+        sigma_ct = 0.005#0.5   #Sensor noise strength
         #self.processNoise = np.diag([1.0, 1.0, 1.0, 1.0])**2  # predict state covariance
         self.radarNoise =  sigma_r**2 * np.array([[1,0,0],
                                                   [0,1,0],
@@ -301,11 +304,11 @@ class DetectObjects(object):
         self.aisNoise =  sigma_a**2 * np.array([[1,0,0],
                                                 [0,1,0],
                                                 [0,0,0.1]])
-        self.cameraNoise_yolo = np.array([[2*sigma_cv**2,0,0],
-                                            [0,2*sigma_cv**2,0],
+        self.cameraNoise_yolo = np.array([[sigma_cv**2,0,0],
+                                            [0,sigma_cv**2,0],
                                             [0,0,sigma_cd**2]])
-        self.cameraNoise_tracker = np.array([[5*sigma_cv**2,0,0],
-                                               [0,5*sigma_cv**2,0],
+        self.cameraNoise_tracker = np.array([[2*sigma_cv**2,0,0],
+                                               [0,2*sigma_cv**2,0],
                                                [0,0,sigma_ct**2]])
         '''self.processNoiseCovariance = sigma_cv**2 * np.array([[(self.dT**4)/4,0, (self.dT**3)/2,0,0,0],
                                                              [0, (self.dT**4)/4, 0,(self.dT**3)/2,0,0],
@@ -326,6 +329,8 @@ class DetectObjects(object):
                                          [0,1,0,0]])
         self.myEstimate = {}
         #print(self.processNoiseCovariance)
+        self.linje = np.linspace(1815,2024,10000)
+        #plt.plot(self.linje, 2.357142857*x -2072.21, '-k')
     
     def f(self, x):
         #dT = 0.02
@@ -371,17 +376,49 @@ class DetectObjects(object):
                              [0,0,0,25**2]]
         self.kf[i] = ExtendedKalman(initialReading,initialCovariance, 1,4,self.sensorNoise, self.f, self.h, self.processNoiseCovariance)
 
+    def dist_to_point_comp(self, point):
+        p1 = np.array([2206,1815])
+        p2 = np.array([2701,2025])
+        #p1 = np.array([1209,1419])
+        #p2 = np.array([1422,1501])
+        dx = p2[0]-p1[0]
+        dy = p2[1]-p1[1]
+        dr2 = float(dx ** 2 + dy ** 2)
+
+        lerp = ((point[0] - p1[0]) * dx + (point[1] - p1[1]) * dy) / dr2
+        if lerp < 0:
+            lerp = 0
+        elif lerp > 1:
+            lerp = 1
+
+        x = lerp * dx + p1[0]
+        y = lerp * dy + p1[1]
+
+        _dx = x - point[0]
+        _dy = y - point[1]
+        square_dist = _dx ** 2 + _dy ** 2
+        return square_dist
+
+    def dist_to_point(self, point):
+        return math.sqrt(self.dist_to_point_comp(point))
 
     def extended_kalman(self):
+        t = time.time()
         #print('EKF: ',msg)
+        p1 = np.array([2206,1815])
+        p2 = np.array([2701,2025])
 
         #phi, theta, psi = self.euler_angles
-
+        radar_angle = None
+        diff2 = 999
+        y = None
+        y1 = None
+        R = self.radarNoise
+        angle_only = False
         
         #b = None
         radar_detections2 = self.radar_detections.copy()
         ais_detections = self.ais_detections.copy()
-
         for i in radar_detections2:
             rx = radar_detections2[i][0]
             ry = radar_detections2[i][1]
@@ -403,16 +440,8 @@ class DetectObjects(object):
                 self.target[i] = -1
 
         for i in self.kf:
-            y = None
-            y1 = None
-            R = None
-            R1 = None
-            angle_only = False
-            
             self.kf[i].predict()
-            
             plot_ell = False
-            
             est_x = self.myEstimate[i][0]
             est_y = self.myEstimate[i][1]
             est_dx = est_x-self.position.x
@@ -422,7 +451,7 @@ class DetectObjects(object):
             #if abs(est_xdot) > 100 or abs(est_ydot) > 100:
             #    self.target[i] = 2000
             angle_est = np.arctan2(est_dy,est_dx)
-            angle_body = angle_est - self.psi + self.radar_offset #- self.looking_angle     # Installation angle offset between radar and vessel  
+            angle_body = angle_est - self.psi# + self.radar_offset #- self.looking_angle     # Installation angle offset between radar and vessel  
             
             #print('AAAAA',angle_body,self.bb_angles)
             if angle_est < -np.pi:
@@ -448,32 +477,41 @@ class DetectObjects(object):
                     #radar_range = np.sqrt((x1-self.position.y)**2 + (x0-self.position.x)**2)
                     y = np.array([x0,x1,radar_angle]).reshape(-1,1)
                     R = self.radarNoise
-                    plt.plot(float(x1), float(x0), 'or', label= 'Radar' if 'Radar' \
-                            not in plt.gca().get_legend_handles_labels()[1] else '')
+                    p3 = np.array([x0,x1])
+                    #d = norm(np.cross(p2-p1, p1-p3))/norm(p2-p1)
+                    d = self.dist_to_point(p3)
+                    if d < 20:
+                        #print(d)
+                        plt.plot(float(x1), float(x0), 'or'
+                        #plt.plot(float(self.count) ,float(d), 'or'
+                            , label= 'Radar' if 'Radar' not in plt.gca().get_legend_handles_labels()[1] else '')
                     
                     #plt.plot(float(self.count), float(np.sqrt((self.myEstimate[i][0]-x0)**2+(self.myEstimate[i][1]-x1)**2)), 'or')
                     #g = self.kf[i].getGain()
                     #p = self.kf[i].getP()
                     #est = self.kf[i].getEstimate()
                     plot_ell = True
-                    print('RADAR_ANGLE', radar_angle)
                     #break
             for a in ais_detections:
                 aisx = ais_detections[a][0]
                 aisy = ais_detections[a][1]
-                if np.sqrt((est_x-aisx)**2+(est_y-aisy)**2) < 100:
+                if np.sqrt((est_x-aisx)**2+(est_y-aisy)**2) < 50:
                     ais_angle = np.arctan2(aisy-self.position.y, aisx-self.position.x)
-                    y1 = np.array([aisx,aisy,ais_angle]).reshape(-1,1)
+                    #y1 = np.array([aisx,aisy,ais_angle]).reshape(-1,1)
+                    #print(aisx, aisy)
                     R1 = self.aisNoise
-                    plt.plot(float(aisy), float(aisx), 'ob', label= 'AIS' if 'AIS' \
-                            not in plt.gca().get_legend_handles_labels()[1] else '')
+                    p3 = np.array([aisx,aisy])
+                    d = self.dist_to_point(p3)
+                    if d < 20:
+                        plt.plot(float(aisy), float(aisx), 'ob'
+                        #plt.plot(float(self.count) ,float(d), 'ob'
+                            , label= 'AIS' if 'AIS' not in plt.gca().get_legend_handles_labels()[1] else '')
                     self.ais[i] = [aisx,aisy]
                     self.penalty_ais[i] = 0
                     self.penalty[i] = 0
                     plot_ell = True
-                    print('AIS_ANGLE',ais_angle)
             else:
-                if est_range < 2000:
+                if est_range < 1500:
                     a = []
                     yolo = False
                     re3 = False
@@ -483,28 +521,32 @@ class DetectObjects(object):
                             yo += 2*np.pi
                         elif yo > np.pi:
                             yo -= 2*np.pi 
-                        print('YO',yo)
+                        #print('YO',yo)
                         #for yo in angle:
                         diff = angle_est-yo
+                        if radar_angle is not None:
+                            diff2 = radar_angle-yo
+                        print('DIFF',diff,diff2)
                         
-                        if abs(diff) < np.deg2rad(10):
+                        if abs(diff) < np.deg2rad(8) or abs(diff2) < np.deg2rad(8):
                             a.append([abs(diff), yo])
                             R = self.cameraNoise_yolo
                             yolo = True
                     else:
                         for k in self.bb_angles:
-                            print('re3',k)
                             if k < -np.pi:
                                 k += 2*np.pi
                             elif k > np.pi:
                                 k -= 2*np.pi 
+                            #print('re3',k)
                             diff = angle_est-k
-                            
-                            if abs(diff) < np.deg2rad(10):
+                            if radar_angle is not None:
+                                diff2 = abs(radar_angle-k)
+                            if abs(diff) < np.deg2rad(4) or diff2 < np.deg2rad(4):
                                 a.append([abs(diff), k])
                                 R = self.cameraNoise_tracker
                                 re3 = True
-                    
+                    #print(a, angle_est, angle_body)
                     #if a != []:
                     if yolo or re3:
                         b = min(a, key=lambda x: x[0])
@@ -514,53 +556,59 @@ class DetectObjects(object):
                         elif c > np.pi:
                             c -= 2*np.pi 
                         #d = c - self.looking_angle - self.psi
-                        print(c)
+                        #print(c)
                         dx = float(est_range*np.cos(c))
                         dy = float(est_range*np.sin(c))
+                        p3 = np.array([float(dx+self.position.x),float(dy+self.position.y)])
+                        d = self.dist_to_point(p3)
 
                         c_alpha = R[2][2]
-                
-                        if i in self.radar or self.penalty_radar[i] < 20:
+                        if i in self.penalty:
+                            y = np.array([float(dx+self.position.x) , float(dy+self.position.y) , c]).reshape(-1,1)
+                            print('CAMERA',y)
+                            self.penalty[i] += 1
+                            R = R * self.penalty[i]**2
+                            R[2][2] = c_alpha
+                        
+                        if i in self.radar:
                             y = np.array([float(self.radar[i][0]),float(self.radar[i][1]), c]).reshape(-1,1)
                             print('RADAR',y)
                             self.penalty_radar[i] += 1
-                            R = np.maximum(R,self.radarNoise)*self.penalty_radar[i]
+                            R = np.minimum(R,self.radarNoise)*self.penalty_radar[i]
                             R[2][2] = c_alpha
-                        elif i in self.ais or self.penalty_ais[i] < 20:
+                        elif i in self.ais:
                             y = np.array([self.ais[i][0], self.ais[i][1], c]).reshape(-1,1)
                             print('AIS',y)
                             self.penalty_ais[i] += 1
-                            R = np.maximum(R,self.aisNoise)*self.penalty_ais[i]
-                            R[2][2] = c_alpha
-                        elif i in self.penalty:
-                            y = np.array([float(dx+self.position.x) , float(dy+self.position.y) , c]).reshape(-1,1)
-                            print('CAM',y)
-                            self.penalty[i] += 1
-                            R = R * self.penalty[i]**2
+                            R = np.minimum(R,self.aisNoise)*self.penalty_ais[i]
                             R[2][2] = c_alpha
                         #R = self.cameraNoise 
                         #R = self.radarNoise
                         angle_only = True
-                        #print(y, R)
+                        
                         
                         
 
                         if yolo:
-                            plt.plot(float(dy+self.position.y), float(dx+self.position.x), 'og', label= 'Camera_Detector' if 'Camera_Detector' \
-                            not in plt.gca().get_legend_handles_labels()[1] else '')
+                            if d < 20:
+                                plt.plot(float(dy+self.position.y), float(dx+self.position.x), 'og'
+                                #plt.plot(float(self.count) ,float(d), 'og'
+                                    , label= 'Camera_Detector' if 'Camera_Detector' not in plt.gca().get_legend_handles_labels()[1] else '')
                         else:
-                            plt.plot(float(dy+self.position.y), float(dx+self.position.x), '+g', label= 'Camera_Tracker' if 'Camera_Tracker' \
-                            not in plt.gca().get_legend_handles_labels()[1] else '')
-                        #plt.plot(float(self.count) ,float(np.sqrt((self.myEstimate[i][0]-(dx+self.position.x))**2+(self.myEstimate[i][1]-(dy+self.position.y))**2)), '+g')
-                print(angle_est, angle_body)           
-            if est_range < 2000:
+                            if d < 20:
+                                plt.plot(float(dy+self.position.y), float(dx+self.position.x), '+g'
+                                #plt.plot(float(self.count) ,float(d), '+g'
+                                    , label= 'Camera_Tracker' if 'Camera_Tracker' not in plt.gca().get_legend_handles_labels()[1] else '')
+                            
+                        
+            if est_range < 2500:
                 #radar_angle_image = angle_body
             
                 #radar_pixel = int(radar_angle_image/self.fov_pixel_hor)
                 self.detections[i] = angle_body
-            if R is not None:
-                self.kf[i].update(y, R, angle_only)
-            if R1 is not None:
+            #print(y)
+            self.kf[i].update(y, R, angle_only)
+            if y1 is not None:
                 self.kf[i].update(y1, R1, angle_only)
             y = None
             y1 = None
@@ -568,10 +616,13 @@ class DetectObjects(object):
             #old = self.myEstimate[i]
             self.myEstimate[i] = self.kf[i].getEstimate()
             #self.delta[i] = np.subtract(self.myEstimate[i], old)
-
-            plt.plot(float(self.myEstimate[i][1]), float(self.myEstimate[i][0]), '+k', label= 'Estimate' if 'Estimate' \
-                            not in plt.gca().get_legend_handles_labels()[1] else '')
-            #plt.plot(float(self.count), 0, '+k')
+            p3 = np.array([self.myEstimate[i][0],self.myEstimate[i][1]])
+            d = self.dist_to_point(p3)
+            if d < 20:
+                plt.plot(float(self.myEstimate[i][1]), float(self.myEstimate[i][0]), '+k'
+                #plt.plot(float(self.count), d, '+k'
+                    , label= 'Estimate' if 'Estimate' not in plt.gca().get_legend_handles_labels()[1] else '')
+            
             plot_ell = False
             if plot_ell == True:
                 nstd = 50
@@ -613,7 +664,8 @@ class DetectObjects(object):
         self.radar_detections = {}
         self.ais_detections = {}
         self.bb_angles = []
-        self.bb_anglesyolo = {}  
+        self.bb_anglesyolo = {} 
+        print('TIME',time.time()-t)
 
 
     def eigsorted(self, cov):
@@ -690,6 +742,7 @@ class DetectObjects(object):
         aisx = msg.pose.position.x
         aisy = msg.pose.position.y
         self.ais_detections[ais_id] = [aisx, aisy]
+        #print(ais_id,aisx,aisy)
 
     def radar_callback(self, msg):
         #print('RADAR',msg)
@@ -776,7 +829,7 @@ class DetectObjects(object):
                         bb_angle = self.fov_pixel_hor*(xmin + (xmax-xmin)/2 - self.width/2)
                         self.bb_angles.append(bb_angle)# + self.looking_angle + self.camera_offset - self.psi)
                         print(bb_angle)
-                        camera_pixel = int(bb_angle/self.fov_pixel_hor)
+                        camera_pixel = int((bb_angle)/self.fov_pixel_hor)
                         self.c_detections.append(camera_pixel)
                         print('detected')
         self.corners = corners  
@@ -840,12 +893,8 @@ class DetectObjects(object):
                         c = np.add(array, a)
                         corners.append([obj,prob,np.array([xmin,ymin,xmax,ymax])])
                         
-                        bb_angle = (self.fov_pixel_hor*(c[0]+(c[2]-c[0])/2))
-                        if bb_angle < -np.pi:
-                            bb_angle += 2*np.pi
-                        elif bb_angle > np.pi:
-                            bb_angle -= 2*np.pi  
-                        camera_pixel = int(bb_angle/self.fov_pixel_hor)
+                        bb_angle = (self.fov_pixel_hor*(c[0]+(c[2]-c[0])/2))  
+                        camera_pixel = int((bb_angle)/self.fov_pixel_hor)
                         self.c_detections.append(camera_pixel)
                         self.bb_anglesyolo[i] = bb_angle + self.psi + float(angle)
                         
@@ -936,8 +985,6 @@ class DetectObjects(object):
         #print(self.height, self.width)
 
     def bb_callback(self, msg, number):
-        if number == 99:
-            number = self.cam
         h = self.height
         w = self.width
         hwindow, wwindow = self.window.shape[:2]
@@ -960,12 +1007,8 @@ class DetectObjects(object):
                 if ((abs(xmax-xmin) > 4) and (abs(ymax-ymin) > 4)):
                     cv2.rectangle(self.draw2, (int(xmin), int(ymin)), (int(xmax), int(ymax)), [0,0,255], 2)
                     cv2.rectangle(self.draw, (int(c[0]), int(c[1])), (int(c[2]), int(c[3])), [0,0,255], 2)
-                    bb_angle = (self.fov_pixel_hor*(c[0]+(c[2]-c[0])/2))# + self.looking_angle 
-                    if bb_angle < -np.pi:
-                        bb_angle += 2*np.pi
-                    elif bb_angle > np.pi:
-                        bb_angle -= 2*np.pi 
-                    camera_pixel = int(bb_angle/self.fov_pixel_hor)
+                    bb_angle = (self.fov_pixel_hor*(c[0]+(c[2]-c[0])/2))# + self.looking_angle  
+                    camera_pixel = int((bb_angle)/self.fov_pixel_hor)
 
                     self.c_detections.append(camera_pixel)
                     self.bb_angles = []
@@ -1289,7 +1332,8 @@ class DetectObjects(object):
         return np.dot(RX, np.dot(RY, RZ))
         #print(R,RX,RY,RZ)
 
-        
+    #def loop(self, cam, pix):
+
 
     def start(self, number=0):
         #self.EKF_init()
@@ -1308,6 +1352,7 @@ class DetectObjects(object):
         # Subscribers
         rospy.Subscriber('/seapath/pose',geomsg.PoseStamped, self.pose_callback)
         rospy.Subscriber('/ais/syn_text',vismsg.Marker, self.ais_callback)
+        rospy.Subscriber('/ais/marker_syntext',vismsg.Marker, self.ais_callback)
         rospy.Subscriber('/radar/estimates', automsg.RadarEstimate, self.radar_callback)
         rospy.Subscriber('/ladybug/camera0/image_raw', Image, self.image_callback, 0)
         rospy.Subscriber('/ladybug/camera1/image_raw', Image, self.image_callback, 1)
@@ -1319,7 +1364,6 @@ class DetectObjects(object):
         rospy.Subscriber('/re3/bbox2', stdmsg.Float32MultiArray , self.bb_callback, 2)
         rospy.Subscriber('/re3/bbox3', stdmsg.Float32MultiArray , self.bb_callback, 3)
         rospy.Subscriber('/re3/bbox4', stdmsg.Float32MultiArray , self.bb_callback, 4)
-        rospy.Subscriber('/re3/bbox99', stdmsg.Float32MultiArray , self.bb_callback, 99)
         # Publishers
         self.dark_client = actionlib.SimpleActionClient('darknet_ros/check_for_objects', darknetmsg.CheckForObjectsAction)
         bb_publisher0 = rospy.Publisher('/re3/bbox_new0', stdmsg.Float32MultiArray, queue_size=1)
@@ -1338,15 +1382,15 @@ class DetectObjects(object):
         print('FOV',self.fov_pixel_hor,self.fov_radians_hor)
 
         while not rospy.is_shutdown():
-
+            t = time.time()
             corner = []
             c = []
             i = 0
 
                   
             for i in self.detections:
-                det = self.detections[i]
-                
+                detect = self.detections[i]
+                det = detect + self.radar_offset
                 #print(det)
                 if det > np.pi:
                     det -= 2*np.pi
@@ -1382,7 +1426,6 @@ class DetectObjects(object):
                     cam_publiser.publish(cam)
                     self.looking_angle = self.Mounting_angle * cam
                     self.number = cam
-                    self.detection[cam] = pix
 
                     if cam in self.newimage:
 
@@ -1401,7 +1444,7 @@ class DetectObjects(object):
                                 warp = self.rotate_along_axis(self.image[cam], cam, -phi, -theta, -self.looking_angle,
                                     0,-(theta/self.fov_pixel_ver)*np.cos(self.looking_angle)+(phi/self.fov_pixel_ver)*np.sin(self.looking_angle),0)
                                 #self.warppose = self.euler_angles
-                                self.count+=1
+                                self.imcount+=1
                                 self.window = warp[int((h//2)-(h//n)/2):int((h//2)+(h//n)/2),int(pix-(w//n)/2+w/2):int(pix+(w//n)/2+w/2)]
                                 self.draw = warp.copy()
                                 self.draw2 = self.window.copy()
@@ -1410,7 +1453,8 @@ class DetectObjects(object):
                                 rosImg = bridge.cv2_to_imgmsg(self.window)#, encoding="passthrough")
                                 #self.detector(i, n, net, meta, self.window, 0.1)
                                 cam = 0
-                                if (self.count % 1 == 0): 
+                                self.detection[cam] = pix
+                                if (self.imcount % 2 == 0): 
                                     if self.detect_ready:
                                         #self.yolo_attitude[i] = self.im_attitude[cam]
                                         self.yolo_angle[cam]= self.looking_angle.copy()
@@ -1421,7 +1465,7 @@ class DetectObjects(object):
 
                                 
                                 locals()['im_publisher%s' %cam].publish(rosImg)
-                                self.cam = cam
+                                #('im_publisher%s' %cam).publish(rosImg)
                                 
                                 if self.corners is None:
                                     hh, ww = self.window.shape[:2]
@@ -1470,28 +1514,32 @@ class DetectObjects(object):
 
             self.detections = {}
 
-            for c in self.c_detections:
-                cv2.line(self.draw, (c+int(w/2), 0), (c+int(w/2), h), (0,255,0), 8)
-            self.c_detections = []
+            
 
             if self.draw is not None:
+                for c in self.c_detections:
+                    cv2.line(self.draw, (c+int(w/2), 0), (c+int(w/2), h), (0,255,0), 8)
+                self.c_detections = []
                 cv2.imshow('Cam', self.draw)
-            cv2.waitKey(1)
+                cv2.waitKey(1)
 
+            #plt.xlabel('Iterations')
+            #plt.ylabel('Distance[m]')
             plt.xlabel('Easting')
             plt.ylabel('Northing')
             #plt.title('About as simple as it gets, folks')
             #plt.grid(True)
             plt.legend(shadow=True, fancybox=True)
-            plt.axes().set_aspect('equal', 'datalim')
+            #plt.axes().set_aspect('equal', 'datalim')
             #plt.plot(float(self.position.y), float(self.position.x), '+b')
             plt.draw()   
-            plt.pause(0.00001)
+            plt.pause(0.0000001)
 
                     #self.previmg = self.window
 
             self.extended_kalman()
-
+            self.count+=1
+            print('LOOP',time.time()-t)
             self.rate.sleep()
 
 
